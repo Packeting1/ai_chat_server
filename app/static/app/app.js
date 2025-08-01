@@ -1009,8 +1009,25 @@ const MessageHandler = {
         'tts_error': function(data) {
             console.error('TTS合成错误:', data.error);
             
+            // 停止所有TTS播放
+            TTSManager.stopAll();
+            
             // 隐藏停止按钮
             $('#stopTtsBtn').hide();
+            
+            // 恢复状态，让用户知道可以继续对话
+            DOMUtils.updateTexts({
+                status: '⚠️ 语音合成失败，但可以继续对话'
+            });
+            
+            // 3秒后恢复正常状态
+            setTimeout(() => {
+                if (isStreaming) {
+                    DOMUtils.updateTexts({
+                        status: CONSTANTS.STATUS_TEXT.LISTENING
+                    });
+                }
+            }, 3000);
             
             ErrorHandler.showError(data.error, 'TTS错误');
         },
@@ -1098,6 +1115,24 @@ const MessageHandler = {
         
         'llm_test_result': function(data) {
             this.handleLLMTestResult(data);
+        },
+        
+        'ai_response_complete': function(data) {
+            console.log('AI回答完成（含TTS处理）:', data.message);
+            
+            // 停止所有TTS相关的UI状态
+            TTSManager.stopAll();
+            $('#stopTtsBtn').hide();
+            
+            // 确保状态恢复到监听状态
+            if (isStreaming) {
+                DOMUtils.updateTexts({
+                    status: CONSTANTS.STATUS_TEXT.LISTENING
+                });
+            }
+            
+            // 完成AI回答
+            this.completeAIResponse();
         }
     },
     

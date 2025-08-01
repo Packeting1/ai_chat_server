@@ -521,8 +521,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 # 保存对话历史（使用过滤后的内容）
                 await session_manager.add_conversation(self.user_id, user_input, filtered_response)
                 
-                # TTS语音合成
-                await self.handle_tts_speak(filtered_response)
+                # TTS语音合成（确保即使TTS失败也不会影响对话流程）
+                try:
+                    await self.handle_tts_speak(filtered_response)
+                except Exception as tts_error:
+                    logger.error(f"🚨 TTS调用失败，用户: {self.user_id}: {tts_error}")
+                    # TTS失败时发送完成通知，确保前端状态恢复
+                    await self.send(text_data=json.dumps({
+                        "type": "ai_response_complete",
+                        "message": "AI回答已完成，TTS语音合成失败但对话可继续"
+                    }))
             
         except Exception as e:
             logger.error(f"LLM调用失败: {e}")
@@ -530,6 +538,11 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({
                     "type": "ai_error",
                     "error": "AI服务暂时不可用"
+                }))
+                # LLM失败时也要发送完成通知，确保前端状态恢复
+                await self.send(text_data=json.dumps({
+                    "type": "ai_response_complete",
+                    "message": "AI回答失败，对话可继续"
                 }))
         finally:
             self.is_ai_speaking = False
@@ -836,16 +849,33 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     "type": "tts_complete",
                     "message": "语音合成完成"
                 }))
+                # TTS成功时也发送完成通知，确保状态一致
+                await self.send(text_data=json.dumps({
+                    "type": "ai_response_complete",
+                    "message": "AI回答和语音合成都已完成"
+                }))
                 logger.info(f"✅ TTS合成成功，用户: {self.user_id}, 文本: {text[:50]}...")
             else:
+                # TTS失败时发送错误通知并确保状态恢复
                 await self.send(text_data=json.dumps({
                     "type": "tts_error",
-                    "error": "语音合成失败"
+                    "error": "语音合成失败，但对话可以继续"
                 }))
                 logger.error(f"❌ TTS合成失败，用户: {self.user_id}, 文本: {text[:50]}...")
                 
+                # 发送AI完成状态，让前端知道AI已经回答完毕，可以继续对话
+                await self.send(text_data=json.dumps({
+                    "type": "ai_response_complete",
+                    "message": "AI回答已完成，语音合成失败但对话可继续"
+                }))
+                
         except SystemConfig.DoesNotExist:
             logger.warning(f"⚠️ 系统配置不存在，跳过TTS，用户: {self.user_id}")
+            # 配置不存在时也要发送完成通知
+            await self.send(text_data=json.dumps({
+                "type": "ai_response_complete",
+                "message": "AI回答已完成，系统配置异常，跳过语音合成"
+            }))
         except Exception as e:
             logger.error(f"💥 TTS处理异常，用户: {self.user_id}: {type(e).__name__}: {e}")
             
@@ -853,9 +883,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             import traceback
             logger.error(f"📜 TTS异常堆栈:\n{traceback.format_exc()}")
             
+            # TTS异常时确保前端状态恢复
             await self.send(text_data=json.dumps({
                 "type": "tts_error",
-                "error": f"语音合成异常: {str(e)}"
+                "error": f"语音合成异常: {str(e)}，但对话可以继续"
+            }))
+            
+            # 发送AI完成状态，确保前端不会卡住
+            await self.send(text_data=json.dumps({
+                "type": "ai_response_complete",
+                "message": "AI回答已完成，语音合成异常但对话可继续"
             }))
 
 class UploadConsumer(AsyncWebsocketConsumer):
