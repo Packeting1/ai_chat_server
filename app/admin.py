@@ -30,6 +30,9 @@ class SystemConfigAdmin(admin.ModelAdmin):
         ('音频配置', {
             'fields': ('audio_sample_rate', 'audio_chunk_size', 'audio_send_interval')
         }),
+        ('TTS配置', {
+            'fields': ('tts_api_key', 'tts_model', 'tts_voice', 'tts_sample_rate', 'tts_enabled')
+        }),
     )
     
     def has_add_permission(self, request):
