@@ -837,15 +837,20 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 logger.info(f"📤 发送最后的音频数据: {len(combined_audio)} 字节，用户: {self.user_id}")
             
             if success:
-                await self.send(text_data=json.dumps({
-                    "type": "tts_complete",
-                    "message": "语音合成完成"
-                }))
-                # TTS成功时也发送完成通知，确保状态一致
+                # 先发送AI完成通知（表示后端处理完成）
                 await self.send(text_data=json.dumps({
                     "type": "ai_response_complete",
                     "message": "AI回答和语音合成都已完成"
                 }))
+                logger.info(f"📢 发送AI完成通知，用户: {self.user_id}")
+                
+                # 再发送TTS完成通知（前端可以根据需要处理UI状态）
+                await self.send(text_data=json.dumps({
+                    "type": "tts_complete",
+                    "message": "语音合成完成"
+                }))
+                logger.info(f"📢 发送TTS完成通知，用户: {self.user_id}")
+                
                 logger.info(f"✅ TTS合成成功，用户: {self.user_id}, 文本: {text[:50]}...")
             else:
                 # TTS失败时发送错误通知并确保状态恢复

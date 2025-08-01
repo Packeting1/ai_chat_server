@@ -1001,9 +1001,21 @@ const MessageHandler = {
             // 隐藏停止按钮
             $('#stopTtsBtn').hide();
             
+            // 短暂显示完成状态
             DOMUtils.updateTexts({
                 status: '✅ 语音合成完成'
             });
+            
+            // 2秒后恢复到监听状态（如果还在流式模式）
+            setTimeout(() => {
+                if (isStreaming) {
+                    DOMUtils.updateTexts({
+                        status: CONSTANTS.STATUS_TEXT.LISTENING
+                    });
+                }
+            }, 2000);
+            
+            console.log('🎵 TTS播放已结束，状态即将恢复到监听模式');
         },
         
         'tts_error': function(data) {
@@ -1120,19 +1132,19 @@ const MessageHandler = {
         'ai_response_complete': function(data) {
             console.log('AI回答完成（含TTS处理）:', data.message);
             
-            // 停止所有TTS相关的UI状态
-            TTSManager.stopAll();
-            $('#stopTtsBtn').hide();
+            // 注意：不要停止TTS播放！让音频自然播放完毕
+            // TTSManager.stopAll(); // 移除这行，让TTS继续播放
             
-            // 确保状态恢复到监听状态
-            if (isStreaming) {
-                DOMUtils.updateTexts({
-                    status: CONSTANTS.STATUS_TEXT.LISTENING
-                });
-            }
+            // 隐藏停止按钮（TTS播放完毕后会自动处理）
+            // $('#stopTtsBtn').hide(); // 让TTS播放完成后自动隐藏
             
-            // 完成AI回答
+            // 不要立即恢复到监听状态，等TTS播放完毕
+            // 状态恢复将由tts_complete处理器处理
+            
+            // 完成AI回答（这个可以立即执行，表示AI文本回答完成）
             this.completeAIResponse();
+            
+            console.log('📝 AI文本回答已完成，TTS继续播放中...');
         }
     },
     

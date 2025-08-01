@@ -145,7 +145,11 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         tts_config = TTSConfig(
             model=config['model'],
             voice=config['voice'],
-            sample_rate=config['sample_rate']
+            sample_rate=config['sample_rate'],
+            volume=80,                    # 音量（0-100）
+            speech_rate=1.0,             # 语速
+            pitch_rate=1.0,              # 音调
+            audio_format="pcm"           # 音频格式
         )
         
         # 创建TTS客户端
@@ -157,21 +161,46 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         logger.info(f"🔧 创建一次性TTS客户端成功，用户: {user_id}")
         
         # 设置回调函数
+        audio_chunk_count = 0
+        total_audio_bytes = 0
+        
         def on_audio(audio_data):
+            nonlocal audio_chunk_count, total_audio_bytes
             try:
-                logger.debug(f"🎵 收到音频数据: {len(audio_data)} 字节，用户: {user_id}")
+                audio_chunk_count += 1
+                total_audio_bytes += len(audio_data) if audio_data else 0
                 
-                # 简单的音频数据验证
+                logger.info(f"🎵 收到音频数据块 #{audio_chunk_count}: {len(audio_data)} 字节，用户: {user_id}")
+                
+                # 详细的音频数据分析
                 if audio_data and len(audio_data) > 0:
-                    # 检查前几个字节是否全为0（静音检测）
-                    sample_bytes = audio_data[:min(10, len(audio_data))]
-                    is_likely_silence = all(b == 0 for b in sample_bytes)
-                    if is_likely_silence:
-                        logger.debug(f"🔇 检测到静音数据片段，用户: {user_id}")
+                    # 分析音频数据的内容
+                    import struct
+                    if len(audio_data) >= 2:
+                        # 解析前几个16位样本
+                        sample_count = min(10, len(audio_data) // 2)
+                        samples = struct.unpack(f'<{sample_count}h', audio_data[:sample_count*2])
+                        max_sample = max(abs(s) for s in samples)
+                        avg_sample = sum(abs(s) for s in samples) / len(samples)
+                        
+                        logger.info(f"🔍 音频分析 #{audio_chunk_count}: 样本数={len(audio_data)//2}, 最大值={max_sample}, 平均值={avg_sample:.1f}")
+                        
+                        # 检查是否真的是静音
+                        is_silence = max_sample < 100  # 阈值调整
+                        if is_silence:
+                            logger.warning(f"🔇 音频块 #{audio_chunk_count} 疑似静音，最大样本值: {max_sample}")
+                        else:
+                            logger.info(f"🔊 音频块 #{audio_chunk_count} 有效，最大样本值: {max_sample}")
+                    
+                    # 显示前几个字节的十六进制
+                    hex_preview = audio_data[:16].hex() if len(audio_data) >= 16 else audio_data.hex()
+                    logger.debug(f"📊 音频数据预览: {hex_preview}...")
                 else:
-                    logger.warning(f"⚠️ 收到空音频数据，用户: {user_id}")
+                    logger.warning(f"⚠️ 收到空音频数据块 #{audio_chunk_count}，用户: {user_id}")
                 
+                # 调用用户回调
                 audio_callback(audio_data)
+                
             except Exception as e:
                 logger.error(f"💥 音频回调失败，用户: {user_id}: {e}")
                 import traceback
@@ -195,14 +224,36 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         logger.info(f"✅ TTS连接建立成功，用户: {user_id}")
         
         # 发送文本进行合成
-        logger.info(f"📤 发送TTS文本，用户: {user_id}, 内容: '{text.strip()[:30]}...'")
-        await tts_client.say(text)
+        cleaned_text = text.strip()
+        logger.info(f"📤 发送TTS文本，用户: {user_id}")
+        logger.info(f"📝 文本内容: '{cleaned_text}'")
+        logger.info(f"📏 文本长度: {len(cleaned_text)} 字符")
+        
+        await tts_client.say(cleaned_text)
+        logger.info(f"✅ TTS文本发送完成，用户: {user_id}")
         
         logger.info(f"🔚 结束TTS输入，用户: {user_id}")
         await tts_client.finish()
         
-        logger.info(f"⏳ 等待TTS完成，用户: {user_id}")
+        logger.info(f"⏳ 开始等待TTS完成，用户: {user_id}")
         await tts_client.wait_done()
+        logger.info(f"🎯 TTS等待完成返回，用户: {user_id}")
+        
+        # 增加短暂延迟，确保所有音频数据都已处理
+        await asyncio.sleep(0.1)
+        
+        # 输出TTS统计信息
+        logger.info(f"📊 TTS完成统计，用户: {user_id}")
+        logger.info(f"  📝 原始文本: '{cleaned_text}'")
+        logger.info(f"  📏 文本长度: {len(cleaned_text)} 字符")
+        logger.info(f"  🎵 音频块数: {audio_chunk_count}")
+        logger.info(f"  💾 总音频字节: {total_audio_bytes}")
+        logger.info(f"  ⏱️ 平均每块: {total_audio_bytes/audio_chunk_count if audio_chunk_count > 0 else 0:.1f} 字节")
+        
+        if audio_chunk_count == 0:
+            logger.error(f"❌ 警告：没有收到任何音频数据！用户: {user_id}")
+        elif total_audio_bytes < 1000:
+            logger.warning(f"⚠️ 警告：音频数据量过少({total_audio_bytes}字节)，可能不完整，用户: {user_id}")
         
         logger.info(f"✅ TTS合成完成，用户: {user_id}, 文本: {text[:50]}...")
         return True
