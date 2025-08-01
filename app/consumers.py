@@ -27,7 +27,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         
         # 为每个连接分配唯一的用户ID
         self.user_id = await session_manager.create_session()
-        logger.info(f"WebSocket流式连接建立，用户ID: {self.user_id}")
+        pass
         
         # 发送用户ID到前端
         user_count = await session_manager.get_user_count()
@@ -56,13 +56,13 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         self.is_running = False
         
-        logger.info(f"用户 {self.user_id} 开始断开连接，关闭代码: {close_code}")
+        pass
         
         # 立即中断TTS播放，避免资源泄露
         try:
             from .tts_pool import interrupt_user_tts
             await interrupt_user_tts(self.user_id)
-            logger.debug(f"用户 {self.user_id} TTS播放已中断")
+            pass
         except Exception as e:
             logger.error(f"中断用户 {self.user_id} TTS播放失败: {e}")
         
@@ -91,11 +91,11 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     # 连接池模式：释放连接
                     pool = await get_connection_pool()
                     await pool.release_connection(self.user_id)
-                    logger.info(f"用户 {self.user_id} 已释放连接池连接")
+                    pass
                 else:
                     # 独立连接模式：直接断开
                     await self.funasr_client.disconnect()
-                    logger.info(f"用户 {self.user_id} 已断开独立FunASR连接")
+                    pass
             except Exception as e:
                 logger.error(f"处理FunASR连接断开失败: {e}")
         
@@ -105,13 +105,13 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             if hasattr(tts_pool, 'user_playing_status') and self.user_id in tts_pool.user_playing_status:
                 async with tts_pool._lock:
                     del tts_pool.user_playing_status[self.user_id]
-                logger.debug(f"清理用户 {self.user_id} 的TTS播放状态")
+                pass
         except Exception as e:
             logger.error(f"清理用户 {self.user_id} TTS状态失败: {e}")
         
         # 清理用户会话
         await session_manager.remove_session(self.user_id)
-        logger.info(f"WebSocket连接关闭，用户 {self.user_id} 会话已清理")
+        pass
         
         raise StopConsumer()
     
@@ -129,7 +129,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 if self.funasr_client is None:
                     raise Exception("连接池已满，无法获取FunASR连接")
                 
-                logger.info(f"用户 {self.user_id} 从连接池获取FunASR连接成功")
+
                 
                 # 发送ASR连接成功通知到前端
                 pool_stats = pool.get_stats()
@@ -147,7 +147,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 # 发送初始配置
                 stream_config = await create_stream_config_async()
                 await self.funasr_client.send_config(stream_config)
-                logger.info(f"用户 {self.user_id} 成功创建独立FunASR连接")
+
                 
                 # 发送ASR连接成功通知到前端
                 await self.send(text_data=json.dumps({
@@ -202,7 +202,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 
                 # 重新从连接池获取连接
                 await self.connect_funasr()
-                logger.info(f"用户 {self.user_id} FunASR重连成功")
+    
                 return
                 
             except Exception as e:
@@ -376,8 +376,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             pass
         except Exception as e:
             logger.error(f"FunASR响应处理任务异常: {e}")
-        finally:
-            logger.info(f"用户 {self.user_id} FunASR响应处理任务结束")
     
     async def call_llm_and_respond(self, user_input):
         """调用LLM并发送响应"""
@@ -428,7 +426,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                 if pending_content == '</think>':
                                     in_think_block = False
                                     pending_content = ""
-                                    logger.info(f"用户 {self.user_id} 遇到think结束标签，退出think块")
+
                                 elif not '</think>'.startswith(pending_content):
                                     # 不是结束标签，重置暂存
                                     logger.debug(f"用户 {self.user_id} think块内非结束标签: {repr(pending_content)}")
@@ -440,7 +438,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         elif is_start_output:
                             # 在开头状态（且不在think块内）
                             if char.isspace():
-                                logger.info(f"用户 {self.user_id} 跳过开头空白字符: {repr(char)}")
+
                                 continue
                             elif char == '<':
                                 pending_content = '<'
@@ -450,11 +448,11 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                 if pending_content == '<think>':
                                     in_think_block = True
                                     pending_content = ""
-                                    logger.info(f"用户 {self.user_id} 在开头遇到think标签，开始跳过")
+
                                     continue
                                 elif not '<think>'.startswith(pending_content):
                                     is_start_output = False
-                                    logger.info(f"用户 {self.user_id} 开头遇到非think标签，结束跳过状态")
+
                                     await self.send(text_data=json.dumps({
                                         "type": "ai_chunk",
                                         "content": pending_content
@@ -465,7 +463,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             else:
                                 # 遇到其他字符，结束开头状态
                                 is_start_output = False
-                                logger.info(f"用户 {self.user_id} 遇到第一个有效字符: {repr(char)}")
+
                                 content_to_send = pending_content + char if pending_content else char
                                 await self.send(text_data=json.dumps({
                                     "type": "ai_chunk",
@@ -481,7 +479,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                 if pending_content == '<think>':
                                     in_think_block = True
                                     pending_content = ""
-                                    logger.info(f"用户 {self.user_id} 在正常状态遇到think标签，开始跳过")
+
                                 elif not '<think>'.startswith(pending_content):
                                     await self.send(text_data=json.dumps({
                                         "type": "ai_chunk",
@@ -613,7 +611,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         await self.reconnect_funasr()
                 
             except asyncio.CancelledError:
-                logger.info(f"用户 {self.user_id} 连接健康检查任务被取消")
+        
                 break
             except Exception as e:
                 logger.error(f"用户 {self.user_id} 连接健康检查失败: {e}")
@@ -634,15 +632,15 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     async def handle_tts_speak(self, text: str):
         """处理TTS语音合成"""
         try:
-            logger.info(f"🎵 开始TTS语音合成流程，用户: {self.user_id}, 文本长度: {len(text)}")
+    
             
             # 检查TTS是否启用
             config = await SystemConfig.objects.aget(pk=1)
             if not config.tts_enabled:
-                logger.info(f"⚠️ TTS功能未启用，跳过语音合成，用户: {self.user_id}")
+        
                 return
             
-            logger.info(f"✅ TTS功能已启用，配置检查: 模型={config.tts_voice}, 采样率={config.tts_sample_rate}")
+    
             
             # 发送TTS开始通知
             await self.send(text_data=json.dumps({
@@ -738,9 +736,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             
             try:
                 # 使用TTS连接池进行语音合成
-                logger.info(f"🔗 调用TTS连接池进行语音合成，用户: {self.user_id}")
+        
                 success = await tts_speak_stream(text, self.user_id, on_audio_data)
-                logger.info(f"📊 TTS连接池调用完成，结果: {'成功' if success else '失败'}，用户: {self.user_id}")
+        
             finally:
                 # 停止音频发送任务
                 audio_task.cancel()
@@ -760,7 +758,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     "sample_rate": sample_rate,
                     "format": "pcm"
                 }))
-                logger.info(f"📤 发送最后的音频数据: {len(combined_audio)} 字节，用户: {self.user_id}")
+        
             
             if success:
                 # 先发送AI完成通知（表示后端处理完成）
@@ -768,16 +766,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     "type": "ai_response_complete",
                     "message": "AI回答和语音合成都已完成"
                 }))
-                logger.info(f"📢 发送AI完成通知，用户: {self.user_id}")
+        
                 
                 # 再发送TTS完成通知（前端可以根据需要处理UI状态）
                 await self.send(text_data=json.dumps({
                     "type": "tts_complete",
                     "message": "语音合成完成"
                 }))
-                logger.info(f"📢 发送TTS完成通知，用户: {self.user_id}")
+        
                 
-                logger.info(f"✅ TTS合成成功，用户: {self.user_id}, 文本: {text[:50]}...")
+        
             else:
                 # TTS失败时发送错误通知并确保状态恢复
                 await self.send(text_data=json.dumps({
@@ -823,10 +821,10 @@ class UploadConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
         await self.accept()
-        logger.info("文件上传WebSocket连接建立")
+    
     
     async def disconnect(self, close_code):
-        logger.info("文件上传WebSocket连接关闭")
+    
         raise StopConsumer()
     
     async def receive(self, text_data=None, bytes_data=None):
@@ -852,7 +850,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
     async def handle_binary_upload(self, audio_data):
         """处理二进制音频文件上传"""
         try:
-            logger.info(f"收到二进制音频数据: {len(audio_data)} 字节")
+        
             
             # 发送处理开始通知
             await self.send(text_data=json.dumps({
@@ -949,14 +947,8 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                     "accumulated": clean_recognition_text(accumulated_text),
                                     "mode": mode
                                 }))
-                            
-                            if raw_text != display_text:
-                                logger.info(f"流式识别结果: 原始='{raw_text}' → 显示='{display_text}' (模式: {mode})")
-                            else:
-                                logger.info(f"流式识别结果: '{raw_text}' (模式: {mode})")
                         
                         if data.get("is_final", False):
-                            logger.info("识别完成")
                             break
                             
                     except Exception as e:
@@ -970,7 +962,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
             stride = int(60 * 10 / 10 / 1000 * sample_rate * 2)
             chunk_num = max(1, (len(audio_data) - 1) // stride + 1)
             
-            logger.info(f"开始发送音频数据，分割为 {chunk_num} 个块")
+        
             
             for i in range(chunk_num):
                 beg = i * stride
@@ -1018,11 +1010,11 @@ class UploadConsumer(AsyncWebsocketConsumer):
                     is_start_output = True  # flag: 是否还在开头输出状态  
                     in_think_block = False
                     pending_content = ""
-                    logger.info(f"[上传识别] 初始化跳过状态: is_start_output={is_start_output}, in_think_block={in_think_block}")
+            
                     
                     async for chunk in call_llm_stream(accumulated_text.strip(), []):
                         chunk_count += 1
-                        logger.info(f"[上传识别] 收到LLM chunk #{chunk_count}: {repr(chunk)}")
+                
                         if chunk:
                             llm_response += chunk
                             
@@ -1038,7 +1030,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                         if pending_content == '</think>':
                                             in_think_block = False
                                             pending_content = ""
-                                            logger.info(f"[上传识别] 遇到think结束标签，退出think块")
+                                    
                                             # think块结束后，继续处理后续字符
                                         elif not '</think>'.startswith(pending_content):
                                             # 不是结束标签，重置暂存
@@ -1051,7 +1043,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                 elif is_start_output:
                                     # 在开头状态（且不在think块内）
                                     if char.isspace():
-                                        logger.info(f"[上传识别] 跳过开头空白字符: {repr(char)}")
+                                
                                         continue
                                     elif char == '<':
                                         pending_content = '<'
@@ -1061,11 +1053,11 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                         if pending_content == '<think>':
                                             in_think_block = True
                                             pending_content = ""
-                                            logger.info(f"[上传识别] 在开头遇到think标签，开始跳过")
+                                    
                                             continue
                                         elif not '<think>'.startswith(pending_content):
                                             is_start_output = False
-                                            logger.info(f"[上传识别] 开头遇到非think标签，结束跳过状态")
+                                    
                                             await self.send(text_data=json.dumps({
                                                 "type": "llm_chunk",
                                                 "chunk": pending_content
@@ -1076,9 +1068,9 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                     else:
                                         # 遇到其他字符，结束开头状态
                                         is_start_output = False
-                                        logger.info(f"[上传识别] 遇到第一个有效字符: {repr(char)}, 结束开头跳过状态")
+                                
                                         content_to_send = pending_content + char if pending_content else char
-                                        logger.info(f"[上传识别] 发送第一个有效内容: {repr(content_to_send)}")
+                                
                                         await self.send(text_data=json.dumps({
                                             "type": "llm_chunk",
                                             "chunk": content_to_send
@@ -1093,7 +1085,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                         if pending_content == '<think>':
                                             in_think_block = True
                                             pending_content = ""
-                                            logger.info(f"[上传识别] 在正常状态遇到think标签，开始跳过")
+                                    
                                         elif not '<think>'.startswith(pending_content):
                                             await self.send(text_data=json.dumps({
                                                 "type": "llm_chunk",
@@ -1115,13 +1107,13 @@ class UploadConsumer(AsyncWebsocketConsumer):
                             "chunk": pending_content
                         }))
                     
-                    logger.info(f"[上传识别] LLM流式响应完成，总共{chunk_count}个chunks，完整响应: '{llm_response}'")
+            
                     
                     # 对完整响应应用think标签过滤
                     from .llm_client import filter_think_tags
                     filtered_response = filter_think_tags(llm_response)
-                    logger.info(f"[上传识别] 过滤前: {repr(llm_response)}")
-                    logger.info(f"[上传识别] 过滤后: {repr(filtered_response)}")
+            
+            
                     
                     await self.send(text_data=json.dumps({
                         "type": "llm_complete",

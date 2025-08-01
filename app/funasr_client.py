@@ -63,9 +63,7 @@ class FunASRClient:
                 if not self.config.funasr_ssl_verify:
                     ssl_context.check_hostname = False
                     ssl_context.verify_mode = ssl.CERT_NONE
-                    logger.info("使用SSL连接，已禁用证书验证")
-                else:
-                    logger.info("使用SSL连接，启用证书验证")
+        
             
             # 添加ping_interval参数以启用WebSocket ping/pong
             self.websocket = await websockets.connect(
@@ -77,7 +75,7 @@ class FunASRClient:
             )
             
             self.connection_created_at = asyncio.get_event_loop().time()
-            logger.info(f"已连接到FunASR服务器: {self.uri}")
+    
             
             # 启动ping任务
             self.ping_task = asyncio.create_task(self._ping_loop())
@@ -132,7 +130,7 @@ class FunASRClient:
                 logger.warning(f"关闭FunASR连接时出错: {e}")
             finally:
                             self.websocket = None
-            logger.info("已断开FunASR连接")
+    
     
     async def send_config(self, config: Dict[str, Any]):
         """发送配置消息"""
@@ -234,7 +232,7 @@ class FunASRClient:
             # 使用官方HTML的固定块大小960字节（而不是动态计算的stride）
             chunk_size = 960
             
-            logger.info(f"开始识别音频文件，使用offline模式，块大小: {chunk_size}，总长度: {len(pcm_data)} 字节")
+        
             
             # 启动识别结果接收任务
             accumulated_text = ""
@@ -258,7 +256,7 @@ class FunASRClient:
                             if mode == "offline" or mode == "2pass-offline":
                                 # offline模式的结果，累积文本
                                 accumulated_text += raw_text + " "
-                                logger.info(f"识别片段: '{raw_text}' (累积长度: {len(accumulated_text)})")
+                    
                                 
                                 # 实时发送识别片段到前端
                                 if progress_callback:
@@ -274,7 +272,7 @@ class FunASRClient:
                         
                         # 等待is_final信号，这是关键
                         if data.get("is_final", False):
-                            logger.info("收到is_final信号，音频识别完成")
+                
                             recognition_complete.set()
                             break
                             
@@ -305,7 +303,7 @@ class FunASRClient:
                 "is_speaking": False
             }
             await self.send_config(end_config)
-            logger.info(f"音频数据发送完成，共发送 {chunk_count} 个块，等待最终识别结果...")
+        
             
             # 等待识别完成或超时
             try:

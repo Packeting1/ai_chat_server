@@ -94,7 +94,7 @@ def process_wav_audio(audio_data: bytes) -> Tuple[bytes, int]:
             sample_rate = wav_file.getframerate()
             frames = wav_file.readframes(wav_file.getnframes())
             
-            logger.info(f"WAV参数: channels={channels}, sample_width={sample_width}, sample_rate={sample_rate}")
+        
             
             # 转换为单声道16位PCM
             pcm_data = convert_to_mono_16bit(frames, channels, sample_width)
@@ -268,17 +268,17 @@ def process_audio_data(audio_data: bytes, filename: str = "") -> Tuple[bytes, in
     Returns:
         (PCM数据, 采样率)
     """
-    logger.info(f"开始处理音频数据: {len(audio_data)} 字节, 文件名: {filename}")
+
     
     try:
         # 获取音频信息
         audio_info = get_audio_info(audio_data)
-        logger.info(f"音频信息: {audio_info}")
+
         
         # 转换为PCM
         pcm_data, sample_rate = convert_to_pcm(audio_data, filename)
         
-        logger.info(f"转换完成: PCM大小={len(pcm_data)} 字节, 采样率={sample_rate}Hz")
+
         
         return pcm_data, sample_rate
         

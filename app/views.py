@@ -38,28 +38,28 @@ def recognize_audio_api(request):
     try:
         # 读取音频文件
         audio_data = audio_file.read()
-        logger.info(f"接收音频文件: {audio_file.name}, 大小: {len(audio_data)} 字节")
+    
         
         # 获取音频信息（用于调试）
         audio_info = get_audio_info(audio_data)
-        logger.info(f"音频信息: {audio_info}")
+
         
         # 异步处理音频
         async def process_audio():
             # 处理音频数据
             pcm_data, sample_rate = process_audio_data(audio_data, audio_file.name or "")
-            logger.info(f"处理后PCM数据大小: {len(pcm_data)} 字节, 采样率: {sample_rate}")
+    
             
             # 语音识别
             funasr_client = FunASRClient()
             recognized_text = await funasr_client.recognize_audio(pcm_data, sample_rate)
-            logger.info(f"识别结果: {recognized_text}")
+    
             
             # 调用LLM（传统模式不保存历史记录）
             llm_response = ""
             if recognized_text:
                 llm_response = await call_llm_simple(recognized_text, [])
-                logger.info(f"LLM回答: {llm_response}")
+        
             
             return {
                 "success": True,

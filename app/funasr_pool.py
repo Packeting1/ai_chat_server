@@ -45,14 +45,14 @@ class FunASRConnectionPool:
             if self._initialized:
                 return
             
-            logger.info(f"初始化FunASR连接池，最小连接数: {self.min_connections}")
+    
             
             # 创建最小连接数
             for i in range(self.min_connections):
                 try:
                     conn = await self._create_connection()
                     self.connections.append(conn)
-                    logger.info(f"创建连接池连接 {i+1}/{self.min_connections}")
+        
                 except Exception as e:
                     logger.error(f"创建连接池连接失败: {e}")
             
@@ -60,7 +60,7 @@ class FunASRConnectionPool:
             self._cleanup_task = asyncio.create_task(self._cleanup_idle_connections())
             self._initialized = True
             
-            logger.info(f"FunASR连接池初始化完成，当前连接数: {len(self.connections)}")
+    
     
     async def get_connection(self, user_id: str) -> Optional[FunASRClient]:
         """为用户获取连接"""
@@ -82,7 +82,7 @@ class FunASRConnectionPool:
                     conn.user_id = user_id
                     conn.last_used = time.time()
                     self.user_connections[user_id] = conn
-                    logger.info(f"为用户 {user_id} 分配连接池连接")
+        
                     return conn.client
             
             # 如果没有空闲连接且未达到最大连接数，创建新连接
@@ -94,7 +94,7 @@ class FunASRConnectionPool:
                     conn.last_used = time.time()
                     self.connections.append(conn)
                     self.user_connections[user_id] = conn
-                    logger.info(f"为用户 {user_id} 创建新连接池连接")
+        
                     return conn.client
                 except Exception as e:
                     logger.error(f"创建新连接失败: {e}")
@@ -116,7 +116,7 @@ class FunASRConnectionPool:
             conn.user_id = None
             conn.last_used = time.time()
             del self.user_connections[user_id]
-            logger.info(f"释放用户 {user_id} 的连接")
+    
     
     async def _create_connection(self) -> PooledConnection:
         """创建新连接"""
@@ -160,10 +160,6 @@ class FunASRConnectionPool:
                             logger.error(f"关闭连接失败: {e}")
                         
                         self.connections.pop(i)
-                        logger.info("清理1个空闲连接")
-                    
-                    if connections_to_remove:
-                        logger.info(f"连接池清理完成，当前连接数: {len(self.connections)}")
                         
             except asyncio.CancelledError:
                 break
@@ -172,7 +168,7 @@ class FunASRConnectionPool:
     
     async def close(self):
         """关闭连接池"""
-        logger.info("关闭FunASR连接池...")
+
         
         # 停止清理任务
         if self._cleanup_task:
@@ -193,7 +189,7 @@ class FunASRConnectionPool:
             self.connections.clear()
             self.user_connections.clear()
         
-        logger.info("FunASR连接池已关闭")
+
     
     def get_stats(self) -> Dict:
         """获取连接池统计信息"""

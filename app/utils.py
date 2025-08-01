@@ -55,7 +55,7 @@ class SessionManager:
         session_id = str(uuid.uuid4())
         UserSession.objects.create(session_id=session_id)
         count = UserSession.objects.count()
-        logger.info(f"创建用户会话: {session_id}, 当前活跃用户数: {count}")
+    
         return session_id
     
     @staticmethod
@@ -89,7 +89,7 @@ class SessionManager:
         try:
             session = UserSession.objects.get(session_id=session_id)
             session.add_conversation(user_input, ai_response)
-            logger.info(f"用户 {session_id} 对话历史已更新，当前保存 {len(session.conversation_history)} 轮对话")
+        
         except UserSession.DoesNotExist:
             logger.warning(f"尝试更新不存在的会话: {session_id}")
     
@@ -100,7 +100,7 @@ class SessionManager:
         try:
             session = UserSession.objects.get(session_id=session_id)
             session.reset_conversation()
-            logger.info(f"用户 {session_id} 对话历史已重置")
+        
         except UserSession.DoesNotExist:
             logger.warning(f"尝试重置不存在的会话: {session_id}")
     
@@ -111,7 +111,7 @@ class SessionManager:
         try:
             UserSession.objects.get(session_id=session_id).delete()
             count = UserSession.objects.count()
-            logger.info(f"移除用户会话: {session_id}, 剩余活跃用户数: {count}")
+        
         except UserSession.DoesNotExist:
             pass
     
@@ -120,8 +120,6 @@ class SessionManager:
     def cleanup_inactive_sessions(inactive_hours: int = None):
         """清理非活跃的用户会话"""
         count = UserSession.cleanup_inactive_sessions(inactive_hours)
-        if count > 0:
-            logger.info(f"清理了 {count} 个非活跃用户会话")
         return count
     
     @staticmethod

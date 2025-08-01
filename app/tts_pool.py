@@ -193,9 +193,7 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         return True
         
     except Exception as e:
-        logger.error(f"💥 TTS合成异常，用户: {user_id}: {type(e).__name__}: {e}")
-        import traceback
-        logger.error(f"📜 详细异常堆栈:\n{traceback.format_exc()}")
+        logger.error(f"TTS合成异常，用户: {user_id}: {e}")
         return False
         
     finally:
@@ -204,11 +202,8 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
             try:
                 if hasattr(tts_client, '_ws') and tts_client._ws and not tts_client._ws.closed:
                     await tts_client._ws.close()
-                    logger.info(f"🗑️ TTS连接已销毁，用户: {user_id}")
             except Exception as cleanup_err:
-                logger.warning(f"⚠️ TTS连接清理失败，用户: {user_id}: {cleanup_err}")
-        
-        logger.info(f"🏁 一次性TTS合成流程结束，用户: {user_id}")
+                logger.warning(f"TTS连接清理失败，用户: {user_id}: {cleanup_err}")
 
 async def interrupt_user_tts(user_id: str) -> bool:
     """
@@ -223,7 +218,6 @@ async def interrupt_user_tts(user_id: str) -> bool:
     Returns:
         bool: 总是返回True（兼容现有代码）
     """
-    logger.info(f"🛑 请求中断TTS播放，用户: {user_id}（一次性连接模式下无需特殊处理）")
     # 在一次性连接模式下，每次TTS都是独立的连接
     # 中断主要依赖前端停止音频播放
     return True

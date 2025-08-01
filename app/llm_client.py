@@ -70,7 +70,7 @@ async def call_llm_simple(user_input: str, conversation_history: List[Dict] = No
     # 添加当前用户输入
     messages.append({"role": "user", "content": "/nothink " + user_input})
     
-    logger.info(f"[非流式调用] 发送请求到LLM，模型: {config.llm_model}, 消息数: {len(messages)}")
+
     
     try:
         response = await client.chat.completions.create(
@@ -81,15 +81,15 @@ async def call_llm_simple(user_input: str, conversation_history: List[Dict] = No
             stream=False
         )
         
-        logger.info(f"[非流式调用] 收到响应: {response}")
+
         
         if response.choices and len(response.choices) > 0:
             content = response.choices[0].message.content
-            logger.info(f"[非流式调用] LLM响应内容: {content}")
+    
             
             # 过滤掉think标签
             filtered_content = filter_think_tags(content)
-            logger.info(f"[非流式调用] 过滤后内容: '{filtered_content}'")
+    
             
             return filtered_content.strip() if filtered_content.strip() else "抱歉，我无法理解您的问题。"
         else:
@@ -134,9 +134,9 @@ async def call_llm_stream(user_input: str, conversation_history: List[Dict] = No
     # 添加当前用户输入
     messages.append({"role": "user", "content": '/nothink ' + user_input})
     
-    logger.info(f"[流式调用] 发送请求到LLM，模型: {config.llm_model}, 消息数: {len(messages)}")
-    logger.info(f"[流式调用] 用户输入: {user_input}")
-    logger.info(f"[流式调用] 历史对话数: {len(conversation_history)}")
+
+
+
     
     try:
         stream = await client.chat.completions.create(
@@ -147,7 +147,7 @@ async def call_llm_stream(user_input: str, conversation_history: List[Dict] = No
             stream=True
         )
         
-        logger.info(f"[流式调用] 开始处理流式响应...")
+    
         
         chunk_count = 0
         
@@ -169,7 +169,7 @@ async def call_llm_stream(user_input: str, conversation_history: List[Dict] = No
             else:
                 logger.debug(f"[流式调用] Chunk中没有choices或choices为空")
         
-        logger.info(f"[流式调用] 流式响应完成，总共{chunk_count}个chunks")
+    
         
         if chunk_count == 0:
             logger.warning("[流式调用] 没有收到任何chunks")
@@ -197,7 +197,7 @@ async def test_llm_connection() -> Dict[str, any]:
         {"role": "user", "content": "/nothink 请回复'连接测试成功'"}
     ]
     
-    logger.info(f"[连接测试] 开始测试LLM连接，API: {config.llm_api_base}, 模型: {config.llm_model}")
+
     
     try:
         start_time = asyncio.get_event_loop().time()
@@ -214,15 +214,15 @@ async def test_llm_connection() -> Dict[str, any]:
         end_time = asyncio.get_event_loop().time()
         response_time = round((end_time - start_time) * 1000, 2)  # 毫秒
         
-        logger.info(f"[连接测试] 收到响应: {response}")
+
         
         if response.choices and len(response.choices) > 0:
             content = response.choices[0].message.content
-            logger.info(f"[连接测试] 响应内容: '{content}'")
+    
             
             # 过滤掉think标签
             filtered_content = filter_think_tags(content)
-            logger.info(f"[连接测试] 过滤后内容: '{filtered_content}'")
+    
             
             return {
                 "success": True,
