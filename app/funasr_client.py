@@ -94,14 +94,14 @@ class FunASRClient:
                     try:
                         # 检查连接状态
                         if hasattr(self.websocket, 'closed') and self.websocket.closed:
-                            logger.debug("FunASR连接已关闭，停止ping")
+
                             break
                         
                         await self.websocket.ping()
                         self.last_ping_time = asyncio.get_event_loop().time()
-                        logger.debug("发送FunASR连接ping")
+
                     except websockets.exceptions.ConnectionClosed:
-                        logger.debug("FunASR连接已关闭，停止ping")
+
                         break
                     except Exception as e:
                         logger.warning(f"FunASR ping失败: {e}")
@@ -109,7 +109,7 @@ class FunASRClient:
                 else:
                     break
         except asyncio.CancelledError:
-            logger.debug("FunASR ping任务被取消")
+            pass
         except Exception as e:
             logger.error(f"FunASR ping循环错误: {e}")
     
@@ -140,7 +140,7 @@ class FunASRClient:
         try:
             message = json.dumps(config, ensure_ascii=False)
             await self.websocket.send(message)
-            logger.debug(f"发送配置: {message}")
+
         except websockets.exceptions.ConnectionClosed:
             logger.warning("FunASR连接已关闭，无法发送配置")
             self.websocket = None
@@ -156,7 +156,7 @@ class FunASRClient:
         
         try:
             await self.websocket.send(audio_data)
-            logger.debug(f"发送音频数据: {len(audio_data)} 字节")
+
         except websockets.exceptions.ConnectionClosed:
             logger.warning("FunASR连接已关闭，无法发送音频数据")
             self.websocket = None
@@ -184,13 +184,13 @@ class FunASRClient:
             
             # 处理二进制消息
             if isinstance(message, bytes):
-                logger.debug(f"收到二进制消息: {len(message)} 字节")
+
                 return None
             
             # 处理文本消息
             try:
                 data = json.loads(message)
-                logger.debug(f"收到文本消息: {data}")
+
                 return data
             except json.JSONDecodeError:
                 logger.warning(f"无法解析JSON消息: {message}")
@@ -251,7 +251,7 @@ class FunASRClient:
                             raw_text = data["text"].strip()
                             mode = data.get("mode", "")
                             
-                            logger.debug(f"收到识别结果: '{raw_text}' (模式: {mode})")
+                            
                             
                             if mode == "offline" or mode == "2pass-offline":
                                 # offline模式的结果，累积文本
@@ -295,7 +295,7 @@ class FunASRClient:
                 chunk_count += 1
                 pos += chunk_size
                 
-                logger.debug(f"发送音频块 {chunk_count}, 大小: {len(chunk)} 字节")
+                
                 
             
             # 发送结束信号（模拟官方HTML的stop()调用）
@@ -333,7 +333,7 @@ class FunASRClient:
                     "wav_name": "stream_end"
                 }
                 await self.send_config(end_config)
-                logger.debug("发送结束信号")
+
             except Exception as e:
                 logger.error(f"发送结束信号失败: {e}")
     
@@ -345,7 +345,7 @@ class FunASRClient:
         # 检查连接时间是否过长（超过1小时）
         current_time = asyncio.get_event_loop().time()
         if self.connection_created_at > 0 and (current_time - self.connection_created_at) > 3600:
-            logger.debug("FunASR连接时间过长，需要重新创建")
+
             return False
         
         # 安全检查连接状态

@@ -154,20 +154,16 @@ async def call_llm_stream(user_input: str, conversation_history: List[Dict] = No
         # 实时流式处理 - 每收到chunk就立即yield，与原版web_server一致
         async for chunk in stream:
             chunk_count += 1
-            logger.debug(f"[流式调用] 收到chunk #{chunk_count}: {chunk}")
+
             
             if chunk.choices and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
-                logger.debug(f"[流式调用] Delta对象: {delta}")
+
                 
                 if delta.content:
                     content = delta.content
-                    logger.debug(f"[流式调用] 实时输出内容: '{content}'")
+
                     yield content  # 立即yield，不等待收集完成
-                else:
-                    logger.debug(f"[流式调用] Delta中没有content字段")
-            else:
-                logger.debug(f"[流式调用] Chunk中没有choices或choices为空")
         
     
         
