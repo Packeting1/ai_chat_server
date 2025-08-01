@@ -32,6 +32,8 @@ class TTSConnectionPool:
         self.cleanup_interval = 60  # 1分钟清理一次
         self._cleanup_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        # 用户当前TTS播放状态
+        self.user_playing_status: Dict[str, TTSConnection] = {}
         
     async def initialize(self):
         """初始化连接池"""
@@ -82,7 +84,31 @@ class TTSConnectionPool:
                 conn.is_busy = False
                 conn.user_id = None
                 conn.last_used = time.time()
+                # 清除用户播放状态
+                if user_id in self.user_playing_status:
+                    del self.user_playing_status[user_id]
                 logger.debug(f"🔄 释放TTS连接，用户: {user_id}")
+    
+    async def interrupt_user_tts(self, user_id: str):
+        """中断指定用户的TTS播放"""
+        async with self._lock:
+            if user_id in self.user_playing_status:
+                conn = self.user_playing_status[user_id]
+                try:
+                    # 中断当前播放
+                    await conn.tts_client.interrupt()
+                    logger.info(f"🛑 中断用户 {user_id} 的TTS播放")
+                    
+                    # 释放连接
+                    conn.is_busy = False
+                    conn.user_id = None
+                    conn.last_used = time.time()
+                    del self.user_playing_status[user_id]
+                    
+                except Exception as e:
+                    logger.error(f"中断TTS播放失败: {e}")
+                    # 出错时强制释放连接
+                    await self.handle_connection_error(conn, e)
     
     async def handle_connection_error(self, conn: TTSConnection, error: Exception):
         """处理连接错误"""
@@ -258,6 +284,10 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         bool: 是否成功
     """
     pool = await get_tts_pool()
+    
+    # 首先中断用户当前的TTS播放
+    await pool.interrupt_user_tts(user_id)
+    
     conn = await pool.get_connection(user_id)
     
     if not conn:
@@ -265,6 +295,10 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         return False
     
     try:
+        # 记录用户播放状态
+        async with pool._lock:
+            pool.user_playing_status[user_id] = conn
+        
         # 设置回调函数
         def on_audio(audio_data):
             try:
@@ -276,10 +310,14 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
             logger.error(f"TTS合成错误: {error}")
             asyncio.create_task(pool.handle_connection_error(conn, error))
         
+        def on_end():
+            logger.debug(f"TTS播放结束，用户: {user_id}")
+        
         # 连接并合成
         await conn.tts_client.connect()
         conn.tts_client.send_audio = on_audio
         conn.tts_client.on_error = on_error
+        conn.tts_client.on_end = on_end
         
         await conn.tts_client.say(text)
         await conn.tts_client.finish()
@@ -294,3 +332,17 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         return False
     finally:
         await pool.release_connection(conn, user_id)
+
+async def interrupt_user_tts(user_id: str) -> bool:
+    """
+    中断指定用户的TTS播放
+    
+    Args:
+        user_id: 用户ID
+    
+    Returns:
+        bool: 是否成功中断
+    """
+    pool = await get_tts_pool()
+    await pool.interrupt_user_tts(user_id)
+    return True

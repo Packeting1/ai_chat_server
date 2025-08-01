@@ -57,6 +57,7 @@ const CONSTANTS = {
         TTS_AUDIO: 'tts_audio',
         TTS_COMPLETE: 'tts_complete',
         TTS_ERROR: 'tts_error',
+        TTS_INTERRUPT: 'tts_interrupt',
         ERROR: 'error',
         RESET: 'reset'
     },
@@ -949,6 +950,13 @@ const MessageHandler = {
         
         'tts_start': function(data) {
             console.log('TTS开始合成:', data.message);
+            
+            // 开始新的TTS播放
+            TTSManager.startNewTTS();
+            
+            // 显示停止按钮
+            $('#stopTtsBtn').show();
+            
             DOMUtils.updateTexts({
                 status: '🔊 正在合成语音...'
             });
@@ -961,6 +969,10 @@ const MessageHandler = {
         
         'tts_complete': function(data) {
             console.log('TTS合成完成:', data.message);
+            
+            // 隐藏停止按钮
+            $('#stopTtsBtn').hide();
+            
             DOMUtils.updateTexts({
                 status: '✅ 语音合成完成'
             });
@@ -968,7 +980,25 @@ const MessageHandler = {
         
         'tts_error': function(data) {
             console.error('TTS合成错误:', data.error);
+            
+            // 隐藏停止按钮
+            $('#stopTtsBtn').hide();
+            
             ErrorHandler.showError(data.error, 'TTS错误');
+        },
+        
+        'tts_interrupt': function(data) {
+            console.log('收到TTS中断信号:', data.reason);
+            
+            // 立即停止TTS播放
+            TTSManager.stopAll();
+            
+            // 隐藏停止按钮
+            $('#stopTtsBtn').hide();
+            
+            DOMUtils.updateTexts({
+                status: `🛑 TTS播放已中断: ${data.reason}`
+            });
         },
         
         'ai_chunk': function(data) {
@@ -1308,6 +1338,19 @@ function toggleTTS() {
     $('#currentText').text(enabled ? 'AI回答将自动播放语音' : 'AI回答仅显示文字');
     
     console.log(`TTS功能${enabled ? '已启用' : '已禁用'}`);
+}
+
+function stopTTS() {
+    TTSManager.stopAll();
+    
+    // 隐藏停止按钮
+    $('#stopTtsBtn').hide();
+    
+    // 更新状态显示
+    $('#status').text('🔇 TTS播放已停止');
+    $('#currentText').text('语音播放已手动停止');
+    
+    console.log('🛑 用户手动停止TTS播放');
 }
 
 // ===========================
@@ -2109,6 +2152,8 @@ const TTSManager = {
     audioContext: null,
     audioQueue: [],
     isPlaying: false,
+    currentSources: [], // 当前播放的音频源
+    isInterrupted: false, // 是否被中断
     
     /**
      * 初始化音频上下文
@@ -2136,8 +2181,8 @@ const TTSManager = {
      * 播放Base64编码的音频数据
      */
     async playAudioData(audioBase64, sampleRate = 22050, format = 'pcm') {
-        if (!appState.ttsEnabled) {
-            console.log('TTS已禁用，跳过音频播放');
+        if (!appState.ttsEnabled || this.isInterrupted) {
+            console.log('TTS已禁用或被中断，跳过音频播放');
             return;
         }
         
@@ -2206,11 +2251,31 @@ const TTSManager = {
      */
     async playAudioBuffer(audioBuffer) {
         return new Promise((resolve) => {
+            if (this.isInterrupted) {
+                resolve();
+                return;
+            }
+            
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(this.audioContext.destination);
             
+            // 记录当前播放的音频源
+            this.currentSources.push(source);
+            this.isPlaying = true;
+            
             source.onended = () => {
+                // 从当前播放列表中移除
+                const index = this.currentSources.indexOf(source);
+                if (index > -1) {
+                    this.currentSources.splice(index, 1);
+                }
+                
+                // 如果没有正在播放的音频，更新状态
+                if (this.currentSources.length === 0) {
+                    this.isPlaying = false;
+                }
+                
                 resolve();
             };
             
@@ -2237,15 +2302,41 @@ const TTSManager = {
      * 停止所有TTS播放
      */
     stopAll() {
+        this.isInterrupted = true;
         this.audioQueue = [];
+        
+        // 停止所有当前播放的音频源
+        this.currentSources.forEach(source => {
+            try {
+                source.stop();
+            } catch (e) {
+                // 忽略已经停止的音频源错误
+            }
+        });
+        this.currentSources = [];
         this.isPlaying = false;
         
         if (this.audioContext) {
-            // 停止所有音频节点
+            // 暂停音频上下文
             this.audioContext.suspend();
         }
         
         console.log('🔇 已停止所有TTS播放');
+    },
+    
+    /**
+     * 开始新的TTS播放（会自动停止之前的播放）
+     */
+    startNewTTS() {
+        this.stopAll();
+        this.isInterrupted = false;
+        
+        // 恢复音频上下文
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume();
+        }
+        
+        console.log('🎵 开始新的TTS播放');
     },
     
     /**

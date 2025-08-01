@@ -14,7 +14,7 @@ from .funasr_client import FunASRClient, create_stream_config_async
 from .funasr_pool import get_connection_pool
 from .llm_client import call_llm_stream, call_llm_simple
 from .audio_processor import process_audio_data, get_audio_info
-from .tts_pool import get_tts_pool, tts_speak_stream
+from .tts_pool import get_tts_pool, tts_speak_stream, interrupt_user_tts
 from .models import SystemConfig
 
 logger = logging.getLogger(__name__)
@@ -262,6 +262,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             # 实时结果，更新显示
                             self.accumulated_text = raw_text
                             display_text = clean_recognition_text(raw_text)
+                            
+                            # 用户开始说话时立即中断TTS播放
+                            if display_text and display_text.strip():
+                                await self.send_tts_interrupt("用户开始说话")
+                                from .tts_pool import interrupt_user_tts
+                                await interrupt_user_tts(self.user_id)
+                                logger.debug(f"用户 {self.user_id} 开始说话，中断TTS播放")
+                            
                             if self.is_running:
                                 await self.send(text_data=json.dumps({
                                     "type": "recognition_partial",
@@ -279,6 +287,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             # 检查是否有有效的新文本
                             if display_text and display_text.strip() and display_text != self.last_complete_text:
                                 self.last_complete_text = display_text
+                                
+                                # 用户完成输入时确保TTS已中断
+                                await self.send_tts_interrupt("用户完成输入")
+                                from .tts_pool import interrupt_user_tts
+                                await interrupt_user_tts(self.user_id)
+                                logger.debug(f"用户 {self.user_id} 完成输入，确保TTS中断")
                                 
                                 # 发送最终识别结果
                                 if self.is_running:
@@ -309,6 +323,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         """调用LLM并发送响应"""
         try:
             self.is_ai_speaking = True
+            
+            # 发送TTS中断信号给前端
+            await self.send_tts_interrupt("AI开始回答")
+            
+            # 中断当前用户的TTS播放
+            await interrupt_user_tts(self.user_id)
             
             # 获取对话历史
             conversation_history = await session_manager.get_conversation_history(self.user_id)
@@ -487,6 +507,18 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"初始化TTS连接池失败: {e}")
     
+    async def send_tts_interrupt(self, reason=""):
+        """发送TTS中断信号给前端"""
+        try:
+            await self.send(text_data=json.dumps({
+                "type": "tts_interrupt",
+                "message": "中断TTS播放",
+                "reason": reason
+            }))
+            logger.debug(f"发送TTS中断信号给用户 {self.user_id}, 原因: {reason}")
+        except Exception as e:
+            logger.error(f"发送TTS中断信号失败: {e}")
+    
     async def handle_tts_speak(self, text: str):
         """处理TTS语音合成"""
         try:
@@ -652,6 +684,14 @@ class UploadConsumer(AsyncWebsocketConsumer):
                             
                             if mode == "2pass-online":
                                 # 实时结果
+                                
+                                # 用户开始说话时立即中断TTS播放
+                                if display_text and display_text.strip():
+                                    await self.send_tts_interrupt("用户开始说话")
+                                    from .tts_pool import interrupt_user_tts
+                                    await interrupt_user_tts(self.user_id)
+                                    logger.debug(f"[上传识别] 用户 {self.user_id} 开始说话，中断TTS播放")
+                                
                                 await self.send(text_data=json.dumps({
                                     "type": "recognition_partial",
                                     "text": display_text,
@@ -661,6 +701,14 @@ class UploadConsumer(AsyncWebsocketConsumer):
                             elif mode == "2pass-offline" or mode == "offline":
                                 # 最终结果
                                 accumulated_text += raw_text
+                                
+                                # 用户完成输入时确保TTS已中断
+                                if display_text and display_text.strip():
+                                    await self.send_tts_interrupt("用户完成输入")
+                                    from .tts_pool import interrupt_user_tts
+                                    await interrupt_user_tts(self.user_id)
+                                    logger.debug(f"[上传识别] 用户 {self.user_id} 完成输入，确保TTS中断")
+                                
                                 await self.send(text_data=json.dumps({
                                     "type": "recognition_segment",
                                     "text": display_text,
