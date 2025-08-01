@@ -43,6 +43,12 @@ class SystemConfig(models.Model):
     tts_sample_rate = models.IntegerField(default=22050, choices=[(8000, '8kHz'), (16000, '16kHz'), (22050, '22.05kHz'), (24000, '24kHz'), (44100, '44.1kHz'), (48000, '48kHz')], help_text="TTS采样率")
     tts_enabled = models.BooleanField(default=False, help_text="启用TTS功能")
     
+    # AI系统提示词配置
+    ai_system_prompt = models.TextField(
+        default="你是一个AI语音助手，请尽可能简短自然的回答用户，你的回答将直接被转换为语音播放给用户，要考虑语音播放的时长。",
+        help_text="AI助手的系统提示词，用于定义AI的角色和行为"
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -94,7 +100,9 @@ class SystemConfig(models.Model):
             "tts_model": self.tts_model,
             "tts_voice": self.tts_voice,
             "tts_sample_rate": self.tts_sample_rate,
-            "tts_enabled": self.tts_enabled
+            "tts_enabled": self.tts_enabled,
+            "ai_system_prompt": self.ai_system_prompt,
+            "ai_simple_system_prompt": self.ai_simple_system_prompt
         }
 
 class UserSession(models.Model):

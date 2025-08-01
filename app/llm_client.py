@@ -59,7 +59,7 @@ async def call_llm_simple(user_input: str, conversation_history: List[Dict] = No
     # 添加系统提示
     messages.append({
         "role": "system",
-        "content": "你是一个友善且有帮助的AI助手。请用简洁、准确的方式回答用户的问题。"
+        "content": config.ai_system_prompt
     })
     
     # 添加历史对话
@@ -123,7 +123,7 @@ async def call_llm_stream(user_input: str, conversation_history: List[Dict] = No
     # 添加系统提示
     messages.append({
         "role": "system",
-        "content": "你是一个AI语音助手，请简洁自然的回答用户的问题。你可以参考之前的对话上下文来给出更好的回答。"
+        "content": config.ai_system_prompt
     })
     
     # 添加历史对话
