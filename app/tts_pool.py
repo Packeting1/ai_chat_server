@@ -28,8 +28,8 @@ class TTSConnectionPool:
         self.max_connections = 10
         self.min_connections = 2
         self.max_idle_time = 300  # 5分钟
-        self.max_error_count = 3
-        self.cleanup_interval = 60  # 1分钟清理一次
+        self.max_error_count = 2  # 降低错误容忍度，更快移除问题连接
+        self.cleanup_interval = 30  # 30秒清理一次，更频繁的健康检查
         self._cleanup_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         # 用户当前TTS播放状态
@@ -56,11 +56,17 @@ class TTSConnectionPool:
             # 查找空闲连接
             for conn_id, conn in self.connections.items():
                 if not conn.is_busy and conn.error_count < self.max_error_count:
-                    conn.is_busy = True
-                    conn.user_id = user_id
-                    conn.last_used = time.time()
-                    logger.debug(f"🔗 分配TTS连接 {conn_id} 给用户 {user_id}")
-                    return conn
+                    # 检查连接是否健康
+                    if await self._is_connection_healthy(conn):
+                        conn.is_busy = True
+                        conn.user_id = user_id
+                        conn.last_used = time.time()
+                        logger.debug(f"🔗 分配TTS连接 {conn_id} 给用户 {user_id}")
+                        return conn
+                    else:
+                        # 连接不健康，移除它
+                        logger.warning(f"⚠️ 检测到不健康的TTS连接，移除: {conn_id}")
+                        await self._remove_connection(conn)
             
             # 如果没有空闲连接且未达到最大连接数，创建新连接
             if len(self.connections) < self.max_connections:
@@ -119,9 +125,26 @@ class TTSConnectionPool:
             
             logger.error(f"❌ TTS连接错误 (错误次数: {conn.error_count}): {error}")
             
-            # 如果错误次数过多，移除连接
-            if conn.error_count >= self.max_error_count:
+            # 检查错误类型，决定处理策略
+            error_str = str(error).lower()
+            
+            # 对于WebSocket相关错误，立即移除连接
+            if any(keyword in error_str for keyword in ['1007', 'invalid frame', 'websocket', 'connection']):
+                logger.warning(f"🔌 检测到WebSocket错误，立即移除连接")
                 await self._remove_connection(conn)
+                return
+            
+            # 对于其他错误，根据错误次数决定
+            if conn.error_count >= self.max_error_count:
+                logger.warning(f"⚠️ 连接错误次数过多，移除连接")
+                await self._remove_connection(conn)
+            else:
+                # 尝试重置连接状态
+                try:
+                    await conn.tts_client.disconnect()
+                    logger.info(f"🔄 重置TTS连接状态")
+                except:
+                    pass
     
     async def _create_connection(self) -> Optional[TTSConnection]:
         """创建新的TTS连接"""
@@ -203,6 +226,12 @@ class TTSConnectionPool:
             connections_to_remove = []
             
             for conn_id, conn in self.connections.items():
+                # 检查连接健康状态
+                if not await self._is_connection_healthy(conn):
+                    logger.warning(f"🔍 清理不健康的TTS连接: {conn_id}")
+                    connections_to_remove.append(conn)
+                    continue
+                
                 # 清理空闲时间过长的连接
                 if (not conn.is_busy and 
                     current_time - conn.last_used > self.max_idle_time and
@@ -231,6 +260,25 @@ class TTSConnectionPool:
                 'sample_rate': 22050,
                 'enabled': False
             }
+    
+    async def _is_connection_healthy(self, conn: TTSConnection) -> bool:
+        """检查连接是否健康"""
+        try:
+            # 检查连接是否已断开
+            if hasattr(conn.tts_client, '_ws') and conn.tts_client._ws:
+                if conn.tts_client._ws.closed:
+                    logger.debug(f"🔌 TTS连接已关闭")
+                    return False
+            
+            # 检查连接时间是否过长
+            if time.time() - conn.created_at > 3600:  # 1小时
+                logger.debug(f"⏰ TTS连接时间过长，需要重新创建")
+                return False
+                
+            return True
+        except Exception as e:
+            logger.debug(f"检查TTS连接健康状态失败: {e}")
+            return False
     
     async def get_stats(self):
         """获取连接池统计"""
@@ -263,6 +311,24 @@ class TTSConnectionPool:
                 await self._remove_connection(conn)
         
         logger.info("✅ TTS连接池已关闭")
+    
+    async def reset_pool(self):
+        """重置连接池"""
+        logger.info("🔄 重置TTS连接池...")
+        
+        async with self._lock:
+            # 移除所有现有连接
+            for conn in list(self.connections.values()):
+                await self._remove_connection(conn)
+            
+            # 重新创建最小连接数
+            for i in range(self.min_connections):
+                try:
+                    await self._create_connection()
+                except Exception as e:
+                    logger.error(f"重置时创建TTS连接失败: {e}")
+        
+        logger.info(f"✅ TTS连接池重置完成，当前连接数: {len(self.connections)}")
 
 # 全局TTS连接池实例
 tts_pool = TTSConnectionPool()

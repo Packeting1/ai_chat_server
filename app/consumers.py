@@ -196,6 +196,8 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     await self.handle_test_llm()
                 elif message_type == 'diagnosis_test':
                     await self.handle_diagnosis_test(message)
+                elif message_type == 'reset_tts_pool':
+                    await self.handle_reset_tts_pool()
                     
             elif bytes_data:
                 # 处理二进制数据（直接的音频数据）
@@ -546,10 +548,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     diagnosis_info["connection_pool"] = pool_stats
                 else:
                     diagnosis_info["connection_pool"] = {"mode": "independent"}
+                
+                # 获取TTS连接池状态
+                tts_pool = await get_tts_pool()
+                tts_stats = await tts_pool.get_stats()
+                diagnosis_info["tts_pool"] = tts_stats
                     
             except Exception as e:
                 logger.error(f"获取连接池状态失败: {e}")
                 diagnosis_info["connection_pool"] = {"error": str(e)}
+                diagnosis_info["tts_pool"] = {"error": str(e)}
             
             await self.send(text_data=json.dumps({
                 "type": "diagnosis_result",
@@ -564,6 +572,26 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 "type": "error",
                 "message": f"诊断测试失败: {str(e)}"
+            }))
+    
+    async def handle_reset_tts_pool(self):
+        """重置TTS连接池"""
+        try:
+            tts_pool = await get_tts_pool()
+            await tts_pool.reset_pool()
+            
+            await self.send(text_data=json.dumps({
+                "type": "tts_pool_reset",
+                "message": "TTS连接池已重置"
+            }))
+            
+            logger.info(f"✅ 用户 {self.user_id} TTS连接池重置完成")
+            
+        except Exception as e:
+            logger.error(f"重置TTS连接池失败: {e}")
+            await self.send(text_data=json.dumps({
+                "type": "error",
+                "message": f"重置TTS连接池失败: {str(e)}"
             }))
     
     async def initialize_tts_pool(self):
