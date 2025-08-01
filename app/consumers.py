@@ -148,37 +148,52 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     
     async def reconnect_funasr(self):
         """重新获取FunASR连接"""
-        try:
-            # 停止当前的响应处理任务
-            if self.funasr_task and not self.funasr_task.done():
-                self.funasr_task.cancel()
-            
-            # 释放当前连接
-            if self.funasr_client:
-                try:
-                    from .utils import get_system_config_async
-                    config = await get_system_config_async()
-                    
-                    if config.use_connection_pool:
-                        pool = await get_connection_pool()
-                        await pool.release_connection(self.user_id)
-                    else:
-                        await self.funasr_client.disconnect()
-                except Exception as e:
-                    logger.error(f"释放连接失败: {e}")
-            
-            # 重新从连接池获取连接
-            await self.connect_funasr()
-            logger.info(f"用户 {self.user_id} FunASR重连成功")
-            
-        except Exception as e:
-            logger.error(f"用户 {self.user_id} FunASR重连失败: {e}")
-            self.asr_connected = False
-            await self.send(text_data=json.dumps({
-                "type": "asr_reconnect_failed",
-                "message": "ASR服务重连失败",
-                "error": str(e)
-            }))
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # 停止当前的响应处理任务
+                if self.funasr_task and not self.funasr_task.done():
+                    self.funasr_task.cancel()
+                
+                # 释放当前连接
+                if self.funasr_client:
+                    try:
+                        from .utils import get_system_config_async
+                        config = await get_system_config_async()
+                        
+                        if config.use_connection_pool:
+                            pool = await get_connection_pool()
+                            await pool.release_connection(self.user_id)
+                        else:
+                            await self.funasr_client.disconnect()
+                    except Exception as e:
+                        logger.error(f"释放连接失败: {e}")
+                
+                # 等待一小段时间再重连
+                await asyncio.sleep(1)
+                
+                # 重新从连接池获取连接
+                await self.connect_funasr()
+                logger.info(f"用户 {self.user_id} FunASR重连成功")
+                return
+                
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"用户 {self.user_id} FunASR重连失败 (尝试 {retry_count}/{max_retries}): {e}")
+                
+                if retry_count < max_retries:
+                    # 等待一段时间再重试
+                    await asyncio.sleep(2 * retry_count)  # 递增等待时间
+                else:
+                    # 所有重试都失败了
+                    self.asr_connected = False
+                    await self.send(text_data=json.dumps({
+                        "type": "asr_reconnect_failed",
+                        "message": "ASR服务重连失败，请刷新页面重试",
+                        "error": str(e)
+                    }))
     
     async def receive(self, text_data=None, bytes_data=None):
         """接收WebSocket消息"""
@@ -608,7 +623,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         """连接健康检查任务"""
         while self.is_running:
             try:
-                await asyncio.sleep(10)  # 每10秒检查一次
+                await asyncio.sleep(5)  # 每5秒检查一次，提高检查频率
                 
                 if not self.is_running:
                     break
@@ -624,12 +639,20 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     logger.warning(f"⚠️ 用户 {self.user_id} FunASR响应处理任务已结束，重新启动...")
                     self.funasr_task = asyncio.create_task(self.handle_funasr_responses())
                 
+                # 检查连接时间，如果连接时间过长则重新连接
+                if self.funasr_client and hasattr(self.funasr_client, 'connection_created_at'):
+                    current_time = asyncio.get_event_loop().time()
+                    if (current_time - self.funasr_client.connection_created_at) > 1800:  # 30分钟
+                        logger.warning(f"⏰ 用户 {self.user_id} FunASR连接时间过长，重新连接...")
+                        self.asr_connected = False
+                        await self.reconnect_funasr()
+                
             except asyncio.CancelledError:
                 logger.info(f"用户 {self.user_id} 连接健康检查任务被取消")
                 break
             except Exception as e:
                 logger.error(f"用户 {self.user_id} 连接健康检查失败: {e}")
-                await asyncio.sleep(5)  # 错误后等待5秒再继续
+                await asyncio.sleep(3)  # 错误后等待3秒再继续
     
     async def send_tts_interrupt(self, reason=""):
         """发送TTS中断信号给前端"""

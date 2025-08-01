@@ -129,7 +129,7 @@ class TTSConnectionPool:
             error_str = str(error).lower()
             
             # 对于WebSocket相关错误，立即移除连接
-            if any(keyword in error_str for keyword in ['1007', 'invalid frame', 'websocket', 'connection']):
+            if any(keyword in error_str for keyword in ['1007', 'invalid frame', 'websocket', 'connection', '1011', 'timeout']):
                 logger.warning(f"🔌 检测到WebSocket错误，立即移除连接")
                 await self._remove_connection(conn)
                 return
@@ -273,6 +273,11 @@ class TTSConnectionPool:
             # 检查连接时间是否过长
             if time.time() - conn.created_at > 3600:  # 1小时
                 logger.debug(f"⏰ TTS连接时间过长，需要重新创建")
+                return False
+            
+            # 检查错误次数是否过多
+            if conn.error_count >= 2:  # 降低错误阈值
+                logger.debug(f"⚠️ TTS连接错误次数过多: {conn.error_count}")
                 return False
                 
             return True

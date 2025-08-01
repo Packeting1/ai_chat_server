@@ -43,6 +43,10 @@ class FunASRClient:
         self.websocket = None
         self.config = None
         self.uri = None
+        self.ping_task = None
+        self.last_ping_time = 0
+        self.ping_interval = 30  # 30秒发送一次ping
+        self.connection_created_at = 0
     
     async def connect(self):
         """连接到FunASR服务器"""
@@ -63,17 +67,63 @@ class FunASRClient:
                 else:
                     logger.info("使用SSL连接，启用证书验证")
             
-            self.websocket = await websockets.connect(self.uri, ssl=ssl_context)
+            # 添加ping_interval参数以启用WebSocket ping/pong
+            self.websocket = await websockets.connect(
+                self.uri, 
+                ssl=ssl_context,
+                ping_interval=30,  # 30秒ping间隔
+                ping_timeout=10,   # 10秒ping超时
+                close_timeout=10   # 10秒关闭超时
+            )
+            
+            self.connection_created_at = asyncio.get_event_loop().time()
             logger.info(f"已连接到FunASR服务器: {self.uri}")
+            
+            # 启动ping任务
+            self.ping_task = asyncio.create_task(self._ping_loop())
+            
         except Exception as e:
             logger.error(f"连接FunASR失败: {e}")
             raise
     
+    async def _ping_loop(self):
+        """定期发送ping以保持连接活跃"""
+        try:
+            while self.websocket and not self.websocket.closed:
+                await asyncio.sleep(self.ping_interval)
+                
+                if self.websocket and not self.websocket.closed:
+                    try:
+                        await self.websocket.ping()
+                        self.last_ping_time = asyncio.get_event_loop().time()
+                        logger.debug("发送FunASR连接ping")
+                    except Exception as e:
+                        logger.warning(f"FunASR ping失败: {e}")
+                        break
+                else:
+                    break
+        except asyncio.CancelledError:
+            logger.debug("FunASR ping任务被取消")
+        except Exception as e:
+            logger.error(f"FunASR ping循环错误: {e}")
+    
     async def disconnect(self):
         """断开连接"""
+        # 取消ping任务
+        if self.ping_task and not self.ping_task.done():
+            self.ping_task.cancel()
+            try:
+                await self.ping_task
+            except asyncio.CancelledError:
+                pass
+        
         if self.websocket:
-            await self.websocket.close()
-            self.websocket = None
+            try:
+                await self.websocket.close()
+            except Exception as e:
+                logger.warning(f"关闭FunASR连接时出错: {e}")
+            finally:
+                            self.websocket = None
             logger.info("已断开FunASR连接")
     
     async def send_config(self, config: Dict[str, Any]):
@@ -81,17 +131,33 @@ class FunASRClient:
         if not self.websocket:
             raise RuntimeError("未连接到FunASR服务器")
         
-        message = json.dumps(config, ensure_ascii=False)
-        await self.websocket.send(message)
-        logger.debug(f"发送配置: {message}")
+        try:
+            message = json.dumps(config, ensure_ascii=False)
+            await self.websocket.send(message)
+            logger.debug(f"发送配置: {message}")
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("FunASR连接已关闭，无法发送配置")
+            self.websocket = None
+            raise RuntimeError("FunASR连接已断开")
+        except Exception as e:
+            logger.error(f"发送FunASR配置失败: {e}")
+            raise
     
     async def send_audio_data(self, audio_data: bytes):
         """发送音频数据"""
         if not self.websocket:
             raise RuntimeError("未连接到FunASR服务器")
         
-        await self.websocket.send(audio_data)
-        logger.debug(f"发送音频数据: {len(audio_data)} 字节")
+        try:
+            await self.websocket.send(audio_data)
+            logger.debug(f"发送音频数据: {len(audio_data)} 字节")
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("FunASR连接已关闭，无法发送音频数据")
+            self.websocket = None
+            raise RuntimeError("FunASR连接已断开")
+        except Exception as e:
+            logger.error(f"发送FunASR音频数据失败: {e}")
+            raise
     
     async def receive_message(self, timeout: float = 10.0) -> Optional[Dict[str, Any]]:
         """接收消息"""
@@ -268,6 +334,12 @@ class FunASRClient:
     def is_connected(self) -> bool:
         """检查是否已连接"""
         if self.websocket is None:
+            return False
+        
+        # 检查连接时间是否过长（超过1小时）
+        current_time = asyncio.get_event_loop().time()
+        if self.connection_created_at > 0 and (current_time - self.connection_created_at) > 3600:
+            logger.debug("FunASR连接时间过长，需要重新创建")
             return False
         
         # 安全检查连接状态
