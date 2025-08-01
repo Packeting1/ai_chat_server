@@ -6,6 +6,7 @@ import json
 import asyncio
 import logging
 import base64
+import time # Added for time.time()
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.exceptions import StopConsumer
 from .utils import session_manager
@@ -684,19 +685,57 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # 获取采样率配置
             sample_rate = config.tts_sample_rate
             
+            # 音频数据缓冲
+            audio_buffer = []
+            buffer_size = 0
+            max_buffer_size = 64000  # 约3秒的音频数据 (22050Hz * 2字节 * 3秒)
+            last_send_time = 0
+            min_send_interval = 0.15  # 最小发送间隔150ms
+            
             # 音频数据回调函数
             def on_audio_data(audio_data):
-                # 将音频数据转换为base64发送给前端
-                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
-                asyncio.create_task(self.send(text_data=json.dumps({
+                nonlocal audio_buffer, buffer_size, last_send_time
+                current_time = time.time()
+                
+                # 添加到缓冲区
+                audio_buffer.append(audio_data)
+                buffer_size += len(audio_data)
+                
+                # 发送条件：缓冲区满了或者距离上次发送超过最小间隔
+                should_send = (buffer_size >= max_buffer_size or 
+                             (current_time - last_send_time >= min_send_interval and buffer_size > 0))
+                
+                if should_send:
+                    # 合并音频数据
+                    combined_audio = b''.join(audio_buffer)
+                    audio_b64 = base64.b64encode(combined_audio).decode('utf-8')
+                    
+                    # 发送给前端
+                    asyncio.create_task(self.send(text_data=json.dumps({
+                        "type": "tts_audio",
+                        "audio_data": audio_b64,
+                        "sample_rate": sample_rate,
+                        "format": "pcm"
+                    })))
+                    
+                    # 重置缓冲区
+                    audio_buffer = []
+                    buffer_size = 0
+                    last_send_time = current_time
+            
+            # 使用TTS连接池进行语音合成
+            success = await tts_speak_stream(text, self.user_id, on_audio_data)
+            
+            # 发送剩余的音频数据
+            if audio_buffer:
+                combined_audio = b''.join(audio_buffer)
+                audio_b64 = base64.b64encode(combined_audio).decode('utf-8')
+                await self.send(text_data=json.dumps({
                     "type": "tts_audio",
                     "audio_data": audio_b64,
                     "sample_rate": sample_rate,
                     "format": "pcm"
-                })))
-            
-            # 使用TTS连接池进行语音合成
-            success = await tts_speak_stream(text, self.user_id, on_audio_data)
+                }))
             
             if success:
                 await self.send(text_data=json.dumps({

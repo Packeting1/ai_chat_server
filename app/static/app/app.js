@@ -2239,6 +2239,34 @@ const TTSManager = {
     audioBufferQueue: [], // 音频缓冲区队列
     isProcessingQueue: false, // 是否正在处理队列
     
+    // 音频播放统计
+    playbackStats: {
+        totalChunks: 0,
+        totalDuration: 0,
+        averageChunkDuration: 0,
+        lastUpdateTime: 0
+    },
+    
+    /**
+     * 更新播放统计信息
+     */
+    updatePlaybackStats(audioBuffer) {
+        this.playbackStats.totalChunks++;
+        this.playbackStats.totalDuration += audioBuffer.duration;
+        this.playbackStats.averageChunkDuration = this.playbackStats.totalDuration / this.playbackStats.totalChunks;
+        this.playbackStats.lastUpdateTime = Date.now();
+        
+        // 每10个音频片段输出一次统计信息
+        if (this.playbackStats.totalChunks % 10 === 0) {
+            console.log('📊 TTS播放统计:', {
+                总片段数: this.playbackStats.totalChunks,
+                总时长: this.playbackStats.totalDuration.toFixed(2) + '秒',
+                平均片段时长: this.playbackStats.averageChunkDuration.toFixed(3) + '秒',
+                队列长度: this.audioBufferQueue.length
+            });
+        }
+    },
+    
     /**
      * 初始化音频上下文
      */
@@ -2258,7 +2286,12 @@ const TTSManager = {
             await this.audioContext.resume();
         }
         
-        return true;
+        // 如果音频上下文被阻塞，尝试恢复
+        if (this.audioContext.state === 'interrupted') {
+            await this.audioContext.resume();
+        }
+        
+        return this.audioContext.state === 'running';
     },
     
     /**
@@ -2315,6 +2348,12 @@ const TTSManager = {
      */
     async createPCMAudioBuffer(arrayBuffer, sampleRate) {
         try {
+            // 验证音频数据
+            if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+                console.warn('⚠️ 收到空的音频数据');
+                return null;
+            }
+            
             // 将ArrayBuffer转换为Float32Array
             const int16Array = new Int16Array(arrayBuffer);
             const float32Array = new Float32Array(int16Array.length);
@@ -2327,6 +2366,11 @@ const TTSManager = {
             // 创建音频缓冲区
             const audioBuffer = this.audioContext.createBuffer(1, float32Array.length, sampleRate);
             audioBuffer.getChannelData(0).set(float32Array);
+            
+            // 验证音频缓冲区
+            if (audioBuffer.duration < 0.01) { // 小于10ms的音频片段可能有问题
+                console.warn('⚠️ 音频片段过短，可能影响播放质量:', audioBuffer.duration.toFixed(3), '秒');
+            }
             
             return audioBuffer;
             
@@ -2373,10 +2417,21 @@ const TTSManager = {
             const audioBuffer = this.audioBufferQueue.shift();
             // console.log('▶️ 播放队列中的音频片段，时长:', audioBuffer.duration.toFixed(3), '秒，剩余队列:', this.audioBufferQueue.length); // 减少调试日志
             
+            // 检测音频质量
+            const quality = this.checkAudioQuality(audioBuffer);
+            if (!quality.isGood) {
+                console.warn('⚠️ 检测到音频质量问题:', quality);
+            }
+            
+            // 更新播放统计
+            this.updatePlaybackStats(audioBuffer);
+            
             await this.playAudioBuffer(audioBuffer);
             
-            // 小延迟确保无缝连接
-            await new Promise(resolve => setTimeout(resolve, 10));
+            // 减少延迟，提高播放连续性
+            if (this.audioBufferQueue.length > 0) {
+                await new Promise(resolve => setTimeout(resolve, 5)); // 从10ms减少到5ms
+            }
         }
         
         this.isProcessingQueue = false;
@@ -2406,6 +2461,26 @@ const TTSManager = {
                 return;
             }
             
+            // 确保音频上下文处于运行状态
+            if (this.audioContext.state !== 'running') {
+                this.audioContext.resume().then(() => {
+                    // 音频上下文恢复后继续播放
+                    this._startAudioPlayback(audioBuffer, resolve);
+                }).catch(error => {
+                    console.error('❌ 恢复音频上下文失败:', error);
+                    resolve();
+                });
+            } else {
+                this._startAudioPlayback(audioBuffer, resolve);
+            }
+        });
+    },
+    
+    /**
+     * 开始音频播放的内部方法
+     */
+    _startAudioPlayback(audioBuffer, resolve) {
+        try {
             // console.log('🔊 开始播放音频缓冲区:', {
             //     时长: audioBuffer.duration.toFixed(2) + ' 秒',
             //     采样率: audioBuffer.sampleRate + ' Hz',
@@ -2441,7 +2516,11 @@ const TTSManager = {
             // 开始播放
             // console.log('▶️ 启动音频播放...'); // 减少调试日志
             source.start();
-        });
+            
+        } catch (error) {
+            console.error('❌ 音频播放失败:', error);
+            resolve();
+        }
     },
     
     /**
@@ -2467,6 +2546,14 @@ const TTSManager = {
         this.audioQueue = [];
         this.audioBufferQueue = []; // 清空音频缓冲区队列
         this.isProcessingQueue = false; // 停止队列处理
+        
+        // 重置播放统计
+        this.playbackStats = {
+            totalChunks: 0,
+            totalDuration: 0,
+            averageChunkDuration: 0,
+            lastUpdateTime: 0
+        };
         
         // 停止所有当前播放的音频源
         this.currentSources.forEach(source => {
@@ -2530,81 +2617,168 @@ const TTSManager = {
             $ttsBtn.text(appState.ttsEnabled ? '🔊 TTS开启' : '🔇 TTS关闭')
                    .toggleClass('active', appState.ttsEnabled);
         }
-    }
+    },
+    
+    /**
+     * 检测音频播放质量
+     */
+    checkAudioQuality(audioBuffer) {
+        const duration = audioBuffer.duration;
+        const sampleRate = audioBuffer.sampleRate;
+        const channelData = audioBuffer.getChannelData(0);
+        
+        // 检测静音片段
+        let silenceCount = 0;
+        const threshold = 0.01; // 静音阈值
+        for (let i = 0; i < channelData.length; i += 1000) { // 每1000个样本检查一次
+            if (Math.abs(channelData[i]) < threshold) {
+                silenceCount++;
+            }
+        }
+        const silenceRatio = silenceCount / Math.ceil(channelData.length / 1000);
+        
+        // 检测音量水平
+        let maxVolume = 0;
+        for (let i = 0; i < channelData.length; i++) {
+            maxVolume = Math.max(maxVolume, Math.abs(channelData[i]));
+        }
+        
+        // 输出质量警告
+        if (duration < 0.05) { // 小于50ms的片段
+            console.warn('⚠️ 音频片段过短，可能导致播放卡顿:', duration.toFixed(3), '秒');
+        }
+        
+        if (silenceRatio > 0.8) { // 80%以上是静音
+            console.warn('⚠️ 音频片段主要为静音:', (silenceRatio * 100).toFixed(1) + '%');
+        }
+        
+        if (maxVolume < 0.1) { // 音量过低
+            console.warn('⚠️ 音频音量过低:', maxVolume.toFixed(3));
+        }
+        
+        return {
+            duration,
+            sampleRate,
+            silenceRatio,
+            maxVolume,
+            isGood: duration >= 0.05 && silenceRatio < 0.8 && maxVolume >= 0.1
+        };
+    },
+    
+    /**
+     * 获取音频播放性能报告
+     */
+    getPerformanceReport() {
+        const now = Date.now();
+        const timeSinceLastUpdate = now - this.playbackStats.lastUpdateTime;
+        
+        return {
+            isPlaying: this.isPlaying,
+            queueLength: this.audioBufferQueue.length,
+            isProcessingQueue: this.isProcessingQueue,
+            totalChunks: this.playbackStats.totalChunks,
+            totalDuration: this.playbackStats.totalDuration.toFixed(2),
+            averageChunkDuration: this.playbackStats.averageChunkDuration.toFixed(3),
+            timeSinceLastUpdate: timeSinceLastUpdate,
+            audioContextState: this.audioContext ? this.audioContext.state : 'null',
+            currentSourcesCount: this.currentSources.length
+        };
+    },
+    
+    /**
+     * 显示性能报告
+     */
+    showPerformanceReport() {
+        const report = this.getPerformanceReport();
+        console.log('📊 TTS播放性能报告:', report);
+        
+        // 更新UI状态（如果有相关元素）
+        if (window.DOMUtils) {
+            DOMUtils.updateTexts({
+                status: `🎵 TTS播放中 - 队列:${report.queueLength} 片段:${report.totalChunks} 时长:${report.totalDuration}s`
+            });
+        }
+    },
 };
 
 // ===========================
 // 连接诊断功能
 // ===========================
 async function runDiagnosis() {
-    const $btn = $('#diagnosisBtn');
-    const originalText = $btn.text();
-    
-    $btn.text('🔍 诊断中...').prop('disabled', true);
-    
     console.log('🔍 开始连接诊断...');
     
-    // 1. 检查WebSocket连接状态
-    console.log('📡 WebSocket状态检查:');
-    if (websocket) {
-        console.log(`  - 连接状态: ${getWebSocketStateName(websocket.readyState)}`);
-        console.log(`  - URL: ${websocket.url}`);
-    } else {
-        console.log('  - WebSocket: 未连接');
-    }
+    const results = {
+        websocket: false,
+        audioRecording: false,
+        micPermission: false,
+        network: false,
+        tts: false
+    };
     
-    // 2. 检查音频录制状态
-    console.log('🎤 音频录制状态检查:');
-    console.log(`  - 流媒体状态: ${isStreaming ? '运行中' : '已停止'}`);
-    console.log(`  - 音频流: ${audioStream ? '已获取' : '未获取'}`);
-    console.log(`  - 音频处理器: ${appState.audioProcessor ? '已创建' : '未创建'}`);
-    
-    // 3. 检查用户权限
-    console.log('🔐 权限检查:');
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log('  - 麦克风权限: ✅ 已授权');
-        stream.getTracks().forEach(track => track.stop());
-    } catch (error) {
-        console.log('  - 麦克风权限: ❌ 未授权或不可用');
-        console.error('    错误:', error.message);
-    }
-    
-    // 4. 检查网络连接
-    console.log('🌐 网络连接检查:');
-    console.log(`  - 在线状态: ${navigator.onLine ? '在线' : '离线'}`);
-    
-    // 5. 发送测试消息（如果WebSocket连接正常）
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
-        console.log('📤 发送诊断测试消息...');
-        try {
-            websocket.send(JSON.stringify({
-                type: 'diagnosis_test',
-                timestamp: Date.now()
-            }));
-            console.log('  - 测试消息发送: ✅ 成功');
-        } catch (error) {
-            console.log('  - 测试消息发送: ❌ 失败');
-            console.error('    错误:', error.message);
+        // 1. 检查WebSocket连接
+        if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
+            results.websocket = true;
+            console.log('✅ WebSocket连接正常');
+        } else {
+            console.warn('❌ WebSocket连接异常:', appState.websocket ? getWebSocketStateName(appState.websocket.readyState) : '未连接');
         }
+        
+        // 2. 检查音频录制功能
+        if (appState.mediaRecorder && appState.mediaRecorder.state === 'recording') {
+            results.audioRecording = true;
+            console.log('✅ 音频录制正常');
+        } else {
+            console.warn('❌ 音频录制异常:', appState.mediaRecorder ? appState.mediaRecorder.state : '未初始化');
+        }
+        
+        // 3. 检查麦克风权限
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            results.micPermission = true;
+            console.log('✅ 麦克风权限正常');
+            stream.getTracks().forEach(track => track.stop());
+        } catch (error) {
+            console.warn('❌ 麦克风权限异常:', error.message);
+        }
+        
+        // 4. 检查网络连接
+        try {
+            const response = await fetch('/api/pool/stats/', { method: 'GET' });
+            if (response.ok) {
+                results.network = true;
+                console.log('✅ 网络连接正常');
+            } else {
+                console.warn('❌ 网络连接异常:', response.status);
+            }
+        } catch (error) {
+            console.warn('❌ 网络连接异常:', error.message);
+        }
+        
+        // 5. 检查TTS功能
+        if (TTSManager.audioContext && TTSManager.audioContext.state === 'running') {
+            results.tts = true;
+            console.log('✅ TTS音频上下文正常');
+            
+            // 显示TTS性能报告
+            TTSManager.showPerformanceReport();
+        } else {
+            console.warn('❌ TTS音频上下文异常:', TTSManager.audioContext ? TTSManager.audioContext.state : '未初始化');
+        }
+        
+        // 发送诊断结果到后端
+        if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
+            appState.websocket.send(JSON.stringify({
+                type: 'diagnosis_test',
+                results: results
+            }));
+        }
+        
+        console.log('📊 诊断完成:', results);
+        
+    } catch (error) {
+        console.error('❌ 诊断过程出错:', error);
     }
-    
-    console.log('🔍 诊断完成！请查看控制台输出获取详细信息。');
-    
-    // 显示诊断结果摘要
-    const summary = [
-        `WebSocket: ${websocket ? getWebSocketStateName(websocket.readyState) : '未连接'}`,
-        `音频流: ${isStreaming ? '运行中' : '已停止'}`,
-        `网络: ${navigator.onLine ? '在线' : '离线'}`
-    ].join(' | ');
-    
-    DOMUtils.updateTexts({
-        status: `🔍 诊断完成: ${summary}`
-    });
-    
-    setTimeout(() => {
-        $btn.text(originalText).prop('disabled', false);
-    }, 2000);
 }
 
 function getWebSocketStateName(readyState) {
