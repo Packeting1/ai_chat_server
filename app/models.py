@@ -101,8 +101,7 @@ class SystemConfig(models.Model):
             "tts_voice": self.tts_voice,
             "tts_sample_rate": self.tts_sample_rate,
             "tts_enabled": self.tts_enabled,
-            "ai_system_prompt": self.ai_system_prompt,
-            "ai_simple_system_prompt": self.ai_simple_system_prompt
+            "ai_system_prompt": self.ai_system_prompt
         }
 
 class UserSession(models.Model):

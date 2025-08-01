@@ -14,7 +14,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
             'fields': ('llm_api_base', 'llm_api_key', 'llm_model')
         }),
         ('AI系统提示词配置', {
-            'fields': ('ai_system_prompt')
+            'fields': ('ai_system_prompt',)
         }),
         ('Web服务器配置', {
             'fields': ('web_host', 'web_http_port', 'web_https_port', 'web_ssl_enabled', 'web_ssl_cert_file', 'web_ssl_key_file'),
