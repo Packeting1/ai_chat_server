@@ -8,3 +8,4 @@ redis>=4.0.0
 daphne>=4.0.0
 Twisted[http2,tls]>=25.5.0
 asgiref>=3.8.0
+dashscope-realtime>=0.1.8
