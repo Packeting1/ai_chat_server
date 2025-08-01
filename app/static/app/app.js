@@ -2391,11 +2391,6 @@ const TTSManager = {
             const audioBuffer = this.audioContext.createBuffer(1, float32Array.length, sampleRate);
             audioBuffer.getChannelData(0).set(float32Array);
             
-            // 验证音频缓冲区
-            if (audioBuffer.duration < 0.01) { // 小于10ms的音频片段可能有问题
-                console.warn('⚠️ 音频片段过短，可能影响播放质量:', audioBuffer.duration.toFixed(3), '秒');
-            }
-            
             return audioBuffer;
             
         } catch (error) {
@@ -2440,12 +2435,6 @@ const TTSManager = {
         while (this.audioBufferQueue.length > 0 && !this.isInterrupted) {
             const audioBuffer = this.audioBufferQueue.shift();
             // console.log('▶️ 播放队列中的音频片段，时长:', audioBuffer.duration.toFixed(3), '秒，剩余队列:', this.audioBufferQueue.length); // 减少调试日志
-            
-            // 检测音频质量
-            const quality = this.checkAudioQuality(audioBuffer);
-            if (!quality.isGood) {
-                console.warn('⚠️ 检测到音频质量问题:', quality);
-            }
             
             // 更新播放统计
             this.updatePlaybackStats(audioBuffer);
@@ -2643,51 +2632,7 @@ const TTSManager = {
         }
     },
     
-    /**
-     * 检测音频播放质量
-     */
-    checkAudioQuality(audioBuffer) {
-        const duration = audioBuffer.duration;
-        const sampleRate = audioBuffer.sampleRate;
-        const channelData = audioBuffer.getChannelData(0);
-        
-        // 检测静音片段
-        let silenceCount = 0;
-        const threshold = 0.01; // 静音阈值
-        for (let i = 0; i < channelData.length; i += 1000) { // 每1000个样本检查一次
-            if (Math.abs(channelData[i]) < threshold) {
-                silenceCount++;
-            }
-        }
-        const silenceRatio = silenceCount / Math.ceil(channelData.length / 1000);
-        
-        // 检测音量水平
-        let maxVolume = 0;
-        for (let i = 0; i < channelData.length; i++) {
-            maxVolume = Math.max(maxVolume, Math.abs(channelData[i]));
-        }
-        
-        // 输出质量警告
-        if (duration < 0.05) { // 小于50ms的片段
-            console.warn('⚠️ 音频片段过短，可能导致播放卡顿:', duration.toFixed(3), '秒');
-        }
-        
-        if (silenceRatio > 0.8) { // 80%以上是静音
-            console.warn('⚠️ 音频片段主要为静音:', (silenceRatio * 100).toFixed(1) + '%');
-        }
-        
-        if (maxVolume < 0.1) { // 音量过低
-            console.warn('⚠️ 音频音量过低:', maxVolume.toFixed(3));
-        }
-        
-        return {
-            duration,
-            sampleRate,
-            silenceRatio,
-            maxVolume,
-            isGood: duration >= 0.05 && silenceRatio < 0.8 && maxVolume >= 0.1
-        };
-    },
+
     
     /**
      * 获取音频播放性能报告
