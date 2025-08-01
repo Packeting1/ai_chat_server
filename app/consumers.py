@@ -534,6 +534,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 "message": "开始语音合成..."
             }))
             
+            # 获取采样率配置
+            sample_rate = config.tts_sample_rate
+            
             # 音频数据回调函数
             def on_audio_data(audio_data):
                 # 将音频数据转换为base64发送给前端
@@ -541,7 +544,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 asyncio.create_task(self.send(text_data=json.dumps({
                     "type": "tts_audio",
                     "audio_data": audio_b64,
-                    "sample_rate": config.tts_sample_rate,
+                    "sample_rate": sample_rate,
                     "format": "pcm"
                 })))
             

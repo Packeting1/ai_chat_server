@@ -285,9 +285,6 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
     """
     pool = await get_tts_pool()
     
-    # 首先中断用户当前的TTS播放
-    await pool.interrupt_user_tts(user_id)
-    
     conn = await pool.get_connection(user_id)
     
     if not conn:
