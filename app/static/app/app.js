@@ -963,7 +963,13 @@ const MessageHandler = {
         },
         
         'tts_audio': function(data) {
-            console.log('收到TTS音频数据:', data.audio_data.length, '字符');
+            console.log('🎵 收到TTS音频数据:', {
+                音频数据长度: data.audio_data.length + ' 字符',
+                采样率: data.sample_rate + ' Hz',
+                格式: data.format,
+                Base64前缀: data.audio_data.substring(0, 50) + '...',
+                时间戳: new Date().toISOString()
+            });
             TTSManager.playAudioData(data.audio_data, data.sample_rate, data.format);
         },
         
@@ -2181,30 +2187,46 @@ const TTSManager = {
      * 播放Base64编码的音频数据
      */
     async playAudioData(audioBase64, sampleRate = 22050, format = 'pcm') {
+        console.log('🎧 TTSManager.playAudioData 被调用:', {
+            Base64长度: audioBase64.length,
+            采样率: sampleRate,
+            格式: format,
+            TTS启用状态: appState.ttsEnabled,
+            是否被中断: this.isInterrupted
+        });
+        
         if (!appState.ttsEnabled || this.isInterrupted) {
-            console.log('TTS已禁用或被中断，跳过音频播放');
+            console.log('⚠️ TTS已禁用或被中断，跳过音频播放');
             return;
         }
         
         try {
             // 初始化音频上下文
             if (!(await this.initAudioContext())) {
+                console.log('❌ 音频上下文初始化失败');
                 return;
             }
             
+            console.log('✅ 音频上下文初始化成功，开始解码音频数据...');
+            
             // 解码Base64音频数据
             const audioData = this.base64ToArrayBuffer(audioBase64);
+            console.log('📦 Base64解码完成，音频数据大小:', audioData.byteLength, '字节');
             
             if (format === 'pcm') {
                 // 处理PCM格式的音频数据
+                console.log('🎵 开始播放PCM音频...');
                 await this.playPCMAudio(audioData, sampleRate);
             } else {
                 // 处理其他格式的音频数据
+                console.log('🎵 开始播放其他格式音频...');
                 await this.playDecodedAudio(audioData);
             }
             
+            console.log('✅ 音频播放完成');
+            
         } catch (error) {
-            console.error('播放TTS音频失败:', error);
+            console.error('❌ 播放TTS音频失败:', error);
         }
     },
     
@@ -2213,9 +2235,19 @@ const TTSManager = {
      */
     async playPCMAudio(arrayBuffer, sampleRate) {
         try {
+            console.log('🔧 开始处理PCM音频数据:', {
+                原始数据大小: arrayBuffer.byteLength + ' 字节',
+                采样率: sampleRate + ' Hz'
+            });
+            
             // 将ArrayBuffer转换为Float32Array
             const int16Array = new Int16Array(arrayBuffer);
             const float32Array = new Float32Array(int16Array.length);
+            
+            console.log('📊 PCM数据转换:', {
+                样本数量: int16Array.length,
+                音频时长: (int16Array.length / sampleRate).toFixed(2) + ' 秒'
+            });
             
             // 转换16位整数到浮点数 (-1.0 到 1.0)
             for (let i = 0; i < int16Array.length; i++) {
@@ -2226,11 +2258,15 @@ const TTSManager = {
             const audioBuffer = this.audioContext.createBuffer(1, float32Array.length, sampleRate);
             audioBuffer.getChannelData(0).set(float32Array);
             
+            console.log('🎼 音频缓冲区创建完成，开始播放...');
+            
             // 播放音频
             await this.playAudioBuffer(audioBuffer);
             
+            console.log('🎵 PCM音频播放完成');
+            
         } catch (error) {
-            console.error('播放PCM音频失败:', error);
+            console.error('❌ 播放PCM音频失败:', error);
         }
     },
     
@@ -2252,9 +2288,16 @@ const TTSManager = {
     async playAudioBuffer(audioBuffer) {
         return new Promise((resolve) => {
             if (this.isInterrupted) {
+                console.log('⚠️ 音频播放被中断，跳过播放');
                 resolve();
                 return;
             }
+            
+            console.log('🔊 开始播放音频缓冲区:', {
+                时长: audioBuffer.duration.toFixed(2) + ' 秒',
+                采样率: audioBuffer.sampleRate + ' Hz',
+                声道数: audioBuffer.numberOfChannels
+            });
             
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
@@ -2265,6 +2308,8 @@ const TTSManager = {
             this.isPlaying = true;
             
             source.onended = () => {
+                console.log('🎵 音频播放结束');
+                
                 // 从当前播放列表中移除
                 const index = this.currentSources.indexOf(source);
                 if (index > -1) {
@@ -2274,11 +2319,14 @@ const TTSManager = {
                 // 如果没有正在播放的音频，更新状态
                 if (this.currentSources.length === 0) {
                     this.isPlaying = false;
+                    console.log('🔇 所有音频播放完成');
                 }
                 
                 resolve();
             };
             
+            // 开始播放
+            console.log('▶️ 启动音频播放...');
             source.start();
         });
     },
