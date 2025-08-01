@@ -734,26 +734,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             last_send_time = 0
             min_send_interval = 0.15  # 最小发送间隔150ms
             
-            # 音频数据回调函数 - 只缓存数据，不进行异步操作
-            def on_audio_data(audio_data):
-                nonlocal audio_buffer, buffer_size, last_send_time
-                try:
-                    current_time = time.time()
-                    
-                    # 添加到缓冲区
-                    audio_buffer.append(audio_data)
-                    buffer_size += len(audio_data)
-                    
-                    # 标记需要发送（在主协程中处理）
-                    should_send = (buffer_size >= max_buffer_size or 
-                                 (current_time - last_send_time >= min_send_interval and buffer_size > 0))
-                    
-                    # 简化：只缓存数据，发送逻辑放到TTS完成后统一处理
-                    logger.debug(f"收到音频数据: {len(audio_data)} 字节，缓冲区大小: {buffer_size}")
-                    
-                except Exception as e:
-                    logger.error(f"音频回调处理失败: {e}")
-            
             # 使用事件驱动的音频发送机制
             audio_send_event = asyncio.Event()
             
@@ -770,13 +750,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             combined_audio = b''.join(audio_buffer)
                             audio_b64 = base64.b64encode(combined_audio).decode('utf-8')
                             
-                            # 异步发送，不等待响应
-                            asyncio.create_task(self.send(text_data=json.dumps({
+                            # 直接发送，保证实时性
+                            await self.send(text_data=json.dumps({
                                 "type": "tts_audio",
                                 "audio_data": audio_b64,
                                 "sample_rate": sample_rate,
                                 "format": "pcm"
-                            })))
+                            }))
+                            logger.debug(f"📤 发送音频数据: {len(combined_audio)} 字节，用户: {self.user_id}")
                             
                             # 重置缓冲区
                             audio_buffer = []
@@ -794,26 +775,37 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     except Exception as e:
                         logger.error(f"发送缓冲音频失败: {e}")
             
-            # 优化的音频回调函数
+            # 音频数据回调函数
             def on_audio_data(audio_data):
                 nonlocal audio_buffer, buffer_size, last_send_time
                 try:
+                    logger.debug(f"🎶 收到音频数据: {len(audio_data)} 字节，用户: {self.user_id}")
+                    
+                    # 基本验证
+                    if not audio_data or len(audio_data) == 0:
+                        logger.warning(f"⚠️ 收到空音频数据，用户: {self.user_id}")
+                        return
+                    
                     # 添加到缓冲区
                     audio_buffer.append(audio_data)
                     buffer_size += len(audio_data)
                     
                     # 立即发送条件：缓冲区满了
                     if buffer_size >= max_buffer_size:
+                        logger.debug(f"📦 缓冲区已满，触发发送，大小: {buffer_size}")
                         audio_send_event.set()
                     
                     # 定时发送条件：达到最小间隔且有数据
                     current_time = time.time()
                     if (buffer_size > 0 and 
                         current_time - last_send_time >= min_send_interval):
+                        logger.debug(f"⏰ 达到发送间隔，触发发送，间隔: {current_time - last_send_time:.3f}s")
                         audio_send_event.set()
                         
                 except Exception as e:
-                    logger.error(f"音频回调处理失败: {e}")
+                    logger.error(f"💥 音频回调处理失败，用户: {self.user_id}: {e}")
+                    import traceback
+                    logger.error(f"📜 音频回调异常堆栈:\n{traceback.format_exc()}")
             
             # 启动音频发送任务
             audio_task = asyncio.create_task(send_buffered_audio())
