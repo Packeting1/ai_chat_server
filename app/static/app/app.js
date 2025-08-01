@@ -53,6 +53,10 @@ const CONSTANTS = {
         AI_START: 'ai_start',
         AI_CHUNK: 'ai_chunk',
         AI_COMPLETE: 'ai_complete',
+        TTS_START: 'tts_start',
+        TTS_AUDIO: 'tts_audio',
+        TTS_COMPLETE: 'tts_complete',
+        TTS_ERROR: 'tts_error',
         ERROR: 'error',
         RESET: 'reset'
     },
@@ -77,6 +81,12 @@ class AppState {
         this.currentAiMessage = null;
         this.conversationCount = 0;
         this.currentUserId = null;
+        
+        // TTS相关状态
+        this.ttsEnabled = true;
+        this.audioContext = null;
+        this.audioQueue = [];
+        this.isPlayingTTS = false;
         
         // 音频配置
         this.audioConfig = {
@@ -937,6 +947,30 @@ const MessageHandler = {
             this.startAIResponse(data.user_text);
         },
         
+        'tts_start': function(data) {
+            console.log('TTS开始合成:', data.message);
+            DOMUtils.updateTexts({
+                status: '🔊 正在合成语音...'
+            });
+        },
+        
+        'tts_audio': function(data) {
+            console.log('收到TTS音频数据:', data.audio_data.length, '字符');
+            TTSManager.playAudioData(data.audio_data, data.sample_rate, data.format);
+        },
+        
+        'tts_complete': function(data) {
+            console.log('TTS合成完成:', data.message);
+            DOMUtils.updateTexts({
+                status: '✅ 语音合成完成'
+            });
+        },
+        
+        'tts_error': function(data) {
+            console.error('TTS合成错误:', data.error);
+            ErrorHandler.showError(data.error, 'TTS错误');
+        },
+        
         'ai_chunk': function(data) {
             this.processAIChunk(data.content);
         },
@@ -1264,6 +1298,16 @@ function testLLM() {
         $('#status').text('❌ 发送测试请求失败');
         $('#currentText').text('无法发送测试请求，请检查连接状态');
     }
+}
+
+function toggleTTS() {
+    const enabled = TTSManager.toggleTTS();
+    
+    // 更新状态显示
+    $('#status').text(enabled ? '🔊 TTS已启用' : '🔇 TTS已禁用');
+    $('#currentText').text(enabled ? 'AI回答将自动播放语音' : 'AI回答仅显示文字');
+    
+    console.log(`TTS功能${enabled ? '已启用' : '已禁用'}`);
 }
 
 // ===========================
@@ -2056,4 +2100,179 @@ $(document).ready(async function() {
     `).appendTo('head');
     
     console.log('✅ 应用初始化完成，jQuery已加载');
-}); 
+});
+
+// ===========================
+// TTS音频播放管理器
+// ===========================
+const TTSManager = {
+    audioContext: null,
+    audioQueue: [],
+    isPlaying: false,
+    
+    /**
+     * 初始化音频上下文
+     */
+    async initAudioContext() {
+        if (!this.audioContext) {
+            try {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                console.log('🔊 TTS音频上下文初始化成功');
+            } catch (error) {
+                console.error('初始化音频上下文失败:', error);
+                return false;
+            }
+        }
+        
+        // 确保音频上下文处于运行状态
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+        
+        return true;
+    },
+    
+    /**
+     * 播放Base64编码的音频数据
+     */
+    async playAudioData(audioBase64, sampleRate = 22050, format = 'pcm') {
+        if (!appState.ttsEnabled) {
+            console.log('TTS已禁用，跳过音频播放');
+            return;
+        }
+        
+        try {
+            // 初始化音频上下文
+            if (!(await this.initAudioContext())) {
+                return;
+            }
+            
+            // 解码Base64音频数据
+            const audioData = this.base64ToArrayBuffer(audioBase64);
+            
+            if (format === 'pcm') {
+                // 处理PCM格式的音频数据
+                await this.playPCMAudio(audioData, sampleRate);
+            } else {
+                // 处理其他格式的音频数据
+                await this.playDecodedAudio(audioData);
+            }
+            
+        } catch (error) {
+            console.error('播放TTS音频失败:', error);
+        }
+    },
+    
+    /**
+     * 播放PCM格式的音频数据
+     */
+    async playPCMAudio(arrayBuffer, sampleRate) {
+        try {
+            // 将ArrayBuffer转换为Float32Array
+            const int16Array = new Int16Array(arrayBuffer);
+            const float32Array = new Float32Array(int16Array.length);
+            
+            // 转换16位整数到浮点数 (-1.0 到 1.0)
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768.0;
+            }
+            
+            // 创建音频缓冲区
+            const audioBuffer = this.audioContext.createBuffer(1, float32Array.length, sampleRate);
+            audioBuffer.getChannelData(0).set(float32Array);
+            
+            // 播放音频
+            await this.playAudioBuffer(audioBuffer);
+            
+        } catch (error) {
+            console.error('播放PCM音频失败:', error);
+        }
+    },
+    
+    /**
+     * 播放已解码的音频数据
+     */
+    async playDecodedAudio(arrayBuffer) {
+        try {
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            await this.playAudioBuffer(audioBuffer);
+        } catch (error) {
+            console.error('解码音频数据失败:', error);
+        }
+    },
+    
+    /**
+     * 播放音频缓冲区
+     */
+    async playAudioBuffer(audioBuffer) {
+        return new Promise((resolve) => {
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioContext.destination);
+            
+            source.onended = () => {
+                resolve();
+            };
+            
+            source.start();
+        });
+    },
+    
+    /**
+     * Base64转ArrayBuffer
+     */
+    base64ToArrayBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        return bytes.buffer;
+    },
+    
+    /**
+     * 停止所有TTS播放
+     */
+    stopAll() {
+        this.audioQueue = [];
+        this.isPlaying = false;
+        
+        if (this.audioContext) {
+            // 停止所有音频节点
+            this.audioContext.suspend();
+        }
+        
+        console.log('🔇 已停止所有TTS播放');
+    },
+    
+    /**
+     * 切换TTS启用状态
+     */
+    toggleTTS() {
+        appState.ttsEnabled = !appState.ttsEnabled;
+        console.log(`🔊 TTS ${appState.ttsEnabled ? '已启用' : '已禁用'}`);
+        
+        if (!appState.ttsEnabled) {
+            this.stopAll();
+        }
+        
+        // 更新UI状态
+        this.updateTTSButton();
+        
+        return appState.ttsEnabled;
+    },
+    
+    /**
+     * 更新TTS按钮状态
+     */
+    updateTTSButton() {
+        const $ttsBtn = $('#ttsBtn');
+        if ($ttsBtn.length) {
+            $ttsBtn.text(appState.ttsEnabled ? '🔊 TTS开启' : '🔇 TTS关闭')
+                   .toggleClass('active', appState.ttsEnabled);
+        }
+    }
+}; 

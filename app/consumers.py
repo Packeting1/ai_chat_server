@@ -14,6 +14,8 @@ from .funasr_client import FunASRClient, create_stream_config_async
 from .funasr_pool import get_connection_pool
 from .llm_client import call_llm_stream, call_llm_simple
 from .audio_processor import process_audio_data, get_audio_info
+from .tts_pool import get_tts_pool, tts_speak_stream
+from .models import SystemConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         self.accumulated_text = ""
         self.last_complete_text = ""
         self.is_ai_speaking = False
+        
+        # 初始化TTS连接池
+        await self.initialize_tts_pool()
         
         # 连接到FunASR服务
         await self.connect_funasr()
@@ -431,6 +436,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 
                 # 保存对话历史（使用过滤后的内容）
                 await session_manager.add_conversation(self.user_id, user_input, filtered_response)
+                
+                # TTS语音合成
+                await self.handle_tts_speak(filtered_response)
             
         except Exception as e:
             logger.error(f"LLM调用失败: {e}")
@@ -467,6 +475,66 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     "error": "测试失败",
                     "details": str(e)
                 }
+            }))
+    
+    async def initialize_tts_pool(self):
+        """初始化TTS连接池"""
+        try:
+            tts_pool = await get_tts_pool()
+            if not hasattr(tts_pool, '_initialized'):
+                await tts_pool.initialize()
+                tts_pool._initialized = True
+        except Exception as e:
+            logger.error(f"初始化TTS连接池失败: {e}")
+    
+    async def handle_tts_speak(self, text: str):
+        """处理TTS语音合成"""
+        try:
+            # 检查TTS是否启用
+            config = await SystemConfig.objects.aget(pk=1)
+            if not config.tts_enabled:
+                logger.debug("TTS功能未启用，跳过语音合成")
+                return
+            
+            # 发送TTS开始通知
+            await self.send(text_data=json.dumps({
+                "type": "tts_start",
+                "message": "开始语音合成..."
+            }))
+            
+            # 音频数据回调函数
+            def on_audio_data(audio_data):
+                # 将音频数据转换为base64发送给前端
+                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+                asyncio.create_task(self.send(text_data=json.dumps({
+                    "type": "tts_audio",
+                    "audio_data": audio_b64,
+                    "sample_rate": config.tts_sample_rate,
+                    "format": "pcm"
+                })))
+            
+            # 使用TTS连接池进行语音合成
+            success = await tts_speak_stream(text, self.user_id, on_audio_data)
+            
+            if success:
+                await self.send(text_data=json.dumps({
+                    "type": "tts_complete",
+                    "message": "语音合成完成"
+                }))
+                logger.info(f"TTS合成成功，用户: {self.user_id}, 文本: {text[:50]}...")
+            else:
+                await self.send(text_data=json.dumps({
+                    "type": "tts_error",
+                    "error": "语音合成失败"
+                }))
+                
+        except SystemConfig.DoesNotExist:
+            logger.warning("系统配置不存在，跳过TTS")
+        except Exception as e:
+            logger.error(f"TTS处理异常: {e}")
+            await self.send(text_data=json.dumps({
+                "type": "tts_error",
+                "error": f"语音合成异常: {str(e)}"
             }))
 
 class UploadConsumer(AsyncWebsocketConsumer):

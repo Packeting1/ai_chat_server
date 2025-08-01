@@ -36,6 +36,13 @@ class SystemConfig(models.Model):
     audio_chunk_size = models.IntegerField(default=4096, help_text="音频块大小")
     audio_send_interval = models.IntegerField(default=100, help_text="发送间隔(ms)")
     
+    # TTS配置
+    tts_api_key = models.CharField(max_length=200, default="", help_text="DashScope TTS API密钥")
+    tts_model = models.CharField(max_length=50, default="cosyvoice-v2", help_text="TTS模型")
+    tts_voice = models.CharField(max_length=50, default="longxiaochun_v2", help_text="TTS音色")
+    tts_sample_rate = models.IntegerField(default=22050, choices=[(8000, '8kHz'), (16000, '16kHz'), (22050, '22.05kHz'), (24000, '24kHz'), (44100, '44.1kHz'), (48000, '48kHz')], help_text="TTS采样率")
+    tts_enabled = models.BooleanField(default=False, help_text="启用TTS功能")
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -82,7 +89,12 @@ class SystemConfig(models.Model):
             "max_conversation_history": self.max_conversation_history,
             "audio_sample_rate": self.audio_sample_rate,
             "audio_chunk_size": self.audio_chunk_size,
-            "audio_send_interval": self.audio_send_interval
+            "audio_send_interval": self.audio_send_interval,
+            "tts_api_key": self.tts_api_key,
+            "tts_model": self.tts_model,
+            "tts_voice": self.tts_voice,
+            "tts_sample_rate": self.tts_sample_rate,
+            "tts_enabled": self.tts_enabled
         }
 
 class UserSession(models.Model):
