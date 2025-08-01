@@ -1654,20 +1654,7 @@ function showError(message) {
     return UIManager.showError(message);
 }
 
-// 音频配置相关函数
-function toggleAudioConfig() {
-    const panel = document.getElementById('audioConfigPanel');
-    const btn = document.getElementById('configBtn');
-    
-    if (panel.style.display === 'none') {
-        panel.style.display = 'block';
-        btn.textContent = '隐藏设置';
-        updateBandwidthInfo();
-    } else {
-        panel.style.display = 'none';
-        btn.textContent = '音频设置';
-    }
-}
+// 音频配置相关函数 - 使用ConfigManager统一管理
 
 // ===========================
 // 配置管理模块
@@ -1755,17 +1742,7 @@ const ConfigManager = {
     }
 };
 
-function updateAudioConfig() {
-    return ConfigManager.updateAudioConfig();
-}
-
-function updateBandwidthInfo() {
-    return ConfigManager.updateBandwidthInfo();
-}
-
-function toggleAudioConfig() {
-    return ConfigManager.toggleAudioConfig();
-}
+// 直接使用 ConfigManager.methodName() 调用
 
 // 文件拖拽相关函数
 function handleFileSelect(event) {

@@ -9,8 +9,7 @@ import base64
 import time # Added for time.time()
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.exceptions import StopConsumer
-from .utils import session_manager
-from .utils import clean_recognition_text
+from .utils import session_manager, clean_recognition_text, get_system_config_async
 from .funasr_client import FunASRClient, create_stream_config_async
 from .funasr_pool import get_connection_pool
 from .llm_client import call_llm_stream, call_llm_simple
@@ -57,17 +56,35 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         self.is_running = False
         
+        logger.info(f"用户 {self.user_id} 开始断开连接，关闭代码: {close_code}")
+        
+        # 立即中断TTS播放，避免资源泄露
+        try:
+            from .tts_pool import interrupt_user_tts
+            await interrupt_user_tts(self.user_id)
+            logger.debug(f"用户 {self.user_id} TTS播放已中断")
+        except Exception as e:
+            logger.error(f"中断用户 {self.user_id} TTS播放失败: {e}")
+        
+        # 取消所有异步任务
         if self.funasr_task:
             self.funasr_task.cancel()
+            try:
+                await self.funasr_task
+            except asyncio.CancelledError:
+                pass
         
         # 取消健康检查任务
         if hasattr(self, 'health_check_task') and self.health_check_task:
             self.health_check_task.cancel()
+            try:
+                await self.health_check_task
+            except asyncio.CancelledError:
+                pass
         
         # 根据配置决定如何处理连接
         if self.funasr_client:
             try:
-                from .utils import get_system_config_async
                 config = await get_system_config_async()
                 
                 if config.use_connection_pool:
@@ -82,6 +99,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             except Exception as e:
                 logger.error(f"处理FunASR连接断开失败: {e}")
         
+        # 清理TTS连接池中的用户状态
+        try:
+            tts_pool = await get_tts_pool()
+            if hasattr(tts_pool, 'user_playing_status') and self.user_id in tts_pool.user_playing_status:
+                async with tts_pool._lock:
+                    del tts_pool.user_playing_status[self.user_id]
+                logger.debug(f"清理用户 {self.user_id} 的TTS播放状态")
+        except Exception as e:
+            logger.error(f"清理用户 {self.user_id} TTS状态失败: {e}")
+        
         # 清理用户会话
         await session_manager.remove_session(self.user_id)
         logger.info(f"WebSocket连接关闭，用户 {self.user_id} 会话已清理")
@@ -92,7 +119,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         """连接到FunASR服务（支持连接池和独立连接模式）"""
         try:
             # 获取配置，决定使用连接池还是独立连接
-            from .utils import get_system_config_async
             config = await get_system_config_async()
             
             if config.use_connection_pool:
@@ -161,7 +187,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 # 释放当前连接
                 if self.funasr_client:
                     try:
-                        from .utils import get_system_config_async
                         config = await get_system_config_async()
                         
                         if config.use_connection_pool:
@@ -228,6 +253,13 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         """处理二进制音频数据"""
         logger.debug(f"📤 用户 {self.user_id} 发送音频数据: {len(audio_data)} 字节")
         
+        # 用户开始说话时立即中断TTS（更早的中断时机）
+        if self.is_ai_speaking and len(audio_data) > 0:
+            await self.send_tts_interrupt("检测到用户音频输入")
+            from .tts_pool import interrupt_user_tts
+            await interrupt_user_tts(self.user_id)
+            logger.debug(f"用户 {self.user_id} 音频输入检测，立即中断TTS播放")
+        
         if not self.asr_connected or not self.funasr_client:
             logger.warning(f"⚠️ 用户 {self.user_id} ASR未连接，音频数据被丢弃")
             return
@@ -261,14 +293,21 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             return
         
         try:
+            # 解码Base64音频数据
+            audio_data = base64.b64decode(audio_data_b64)
+            
+            # 用户开始说话时立即中断TTS（更早的中断时机）
+            if self.is_ai_speaking and len(audio_data) > 0:
+                await self.send_tts_interrupt("检测到用户音频输入")
+                from .tts_pool import interrupt_user_tts
+                await interrupt_user_tts(self.user_id)
+                logger.debug(f"用户 {self.user_id} 音频输入检测，立即中断TTS播放")
+            
             # 检查连接状态
             if not self.funasr_client.is_connected():
                 logger.warning(f"用户 {self.user_id} FunASR连接已断开，尝试重连...")
                 await self.reconnect_funasr()
                 return
-            
-            # 解码Base64音频数据
-            audio_data = base64.b64decode(audio_data_b64)
             
             # 发送音频数据到FunASR
             await self.funasr_client.send_audio_data(audio_data)
@@ -555,7 +594,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             
             # 获取连接池状态（如果使用连接池）
             try:
-                from .utils import get_system_config_async
                 config = await get_system_config_async()
                 
                 if config.use_connection_pool:
@@ -692,39 +730,100 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             last_send_time = 0
             min_send_interval = 0.15  # 最小发送间隔150ms
             
-            # 音频数据回调函数
+            # 音频数据回调函数 - 只缓存数据，不进行异步操作
             def on_audio_data(audio_data):
                 nonlocal audio_buffer, buffer_size, last_send_time
-                current_time = time.time()
-                
-                # 添加到缓冲区
-                audio_buffer.append(audio_data)
-                buffer_size += len(audio_data)
-                
-                # 发送条件：缓冲区满了或者距离上次发送超过最小间隔
-                should_send = (buffer_size >= max_buffer_size or 
-                             (current_time - last_send_time >= min_send_interval and buffer_size > 0))
-                
-                if should_send:
-                    # 合并音频数据
-                    combined_audio = b''.join(audio_buffer)
-                    audio_b64 = base64.b64encode(combined_audio).decode('utf-8')
+                try:
+                    current_time = time.time()
                     
-                    # 发送给前端
-                    asyncio.create_task(self.send(text_data=json.dumps({
-                        "type": "tts_audio",
-                        "audio_data": audio_b64,
-                        "sample_rate": sample_rate,
-                        "format": "pcm"
-                    })))
+                    # 添加到缓冲区
+                    audio_buffer.append(audio_data)
+                    buffer_size += len(audio_data)
                     
-                    # 重置缓冲区
-                    audio_buffer = []
-                    buffer_size = 0
-                    last_send_time = current_time
+                    # 标记需要发送（在主协程中处理）
+                    should_send = (buffer_size >= max_buffer_size or 
+                                 (current_time - last_send_time >= min_send_interval and buffer_size > 0))
+                    
+                    # 简化：只缓存数据，发送逻辑放到TTS完成后统一处理
+                    logger.debug(f"收到音频数据: {len(audio_data)} 字节，缓冲区大小: {buffer_size}")
+                    
+                except Exception as e:
+                    logger.error(f"音频回调处理失败: {e}")
             
-            # 使用TTS连接池进行语音合成
-            success = await tts_speak_stream(text, self.user_id, on_audio_data)
+            # 使用事件驱动的音频发送机制
+            audio_send_event = asyncio.Event()
+            
+            async def send_buffered_audio():
+                nonlocal audio_buffer, buffer_size, last_send_time
+                while True:
+                    try:
+                        # 等待事件或定时器
+                        await asyncio.wait_for(audio_send_event.wait(), timeout=0.05)  # 减少到50ms
+                        audio_send_event.clear()
+                        
+                        if buffer_size > 0:
+                            # 合并音频数据
+                            combined_audio = b''.join(audio_buffer)
+                            audio_b64 = base64.b64encode(combined_audio).decode('utf-8')
+                            
+                            # 异步发送，不等待响应
+                            asyncio.create_task(self.send(text_data=json.dumps({
+                                "type": "tts_audio",
+                                "audio_data": audio_b64,
+                                "sample_rate": sample_rate,
+                                "format": "pcm"
+                            })))
+                            
+                            # 重置缓冲区
+                            audio_buffer = []
+                            buffer_size = 0
+                            last_send_time = time.time()
+                            
+                    except asyncio.TimeoutError:
+                        # 定时检查，发送累积的数据
+                        current_time = time.time()
+                        if (buffer_size > 0 and 
+                            current_time - last_send_time >= min_send_interval):
+                            audio_send_event.set()
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        logger.error(f"发送缓冲音频失败: {e}")
+            
+            # 优化的音频回调函数
+            def on_audio_data(audio_data):
+                nonlocal audio_buffer, buffer_size, last_send_time
+                try:
+                    # 添加到缓冲区
+                    audio_buffer.append(audio_data)
+                    buffer_size += len(audio_data)
+                    
+                    # 立即发送条件：缓冲区满了
+                    if buffer_size >= max_buffer_size:
+                        audio_send_event.set()
+                    
+                    # 定时发送条件：达到最小间隔且有数据
+                    current_time = time.time()
+                    if (buffer_size > 0 and 
+                        current_time - last_send_time >= min_send_interval):
+                        audio_send_event.set()
+                        
+                except Exception as e:
+                    logger.error(f"音频回调处理失败: {e}")
+            
+            # 启动音频发送任务
+            audio_task = asyncio.create_task(send_buffered_audio())
+            
+            try:
+                # 使用TTS连接池进行语音合成
+                success = await tts_speak_stream(text, self.user_id, on_audio_data)
+            finally:
+                # 停止音频发送任务
+                audio_task.cancel()
+                try:
+                    await audio_task
+                except asyncio.CancelledError:
+                    pass
             
             # 发送剩余的音频数据
             if audio_buffer:
@@ -736,6 +835,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     "sample_rate": sample_rate,
                     "format": "pcm"
                 }))
+                logger.debug(f"发送最后的音频数据: {len(combined_audio)} 字节")
             
             if success:
                 await self.send(text_data=json.dumps({

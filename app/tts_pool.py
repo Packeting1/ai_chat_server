@@ -19,6 +19,7 @@ class TTSConnection:
     is_busy: bool = False
     user_id: Optional[str] = None
     error_count: int = 0
+    is_connected: bool = False
 
 class TTSConnectionPool:
     """TTS连接池管理器"""
@@ -109,6 +110,7 @@ class TTSConnectionPool:
                     conn.is_busy = False
                     conn.user_id = None
                     conn.last_used = time.time()
+                    # 中断后连接可能仍然有效，保持连接状态
                     del self.user_playing_status[user_id]
                     
                 except Exception as e:
@@ -122,6 +124,7 @@ class TTSConnectionPool:
             conn.error_count += 1
             conn.is_busy = False
             conn.user_id = None
+            conn.is_connected = False  # 标记为未连接
             
             logger.error(f"❌ TTS连接错误 (错误次数: {conn.error_count}): {error}")
             
@@ -264,6 +267,11 @@ class TTSConnectionPool:
     async def _is_connection_healthy(self, conn: TTSConnection) -> bool:
         """检查连接是否健康"""
         try:
+            # 检查错误次数
+            if conn.error_count >= self.max_error_count:
+                logger.debug(f"❌ TTS连接错误次数过多: {conn.error_count}")
+                return False
+            
             # 检查连接是否已断开
             if hasattr(conn.tts_client, '_ws') and conn.tts_client._ws:
                 try:
@@ -295,14 +303,51 @@ class TTSConnectionPool:
             total = len(self.connections)
             busy = sum(1 for conn in self.connections.values() if conn.is_busy)
             idle = total - busy
+            active_users = len(self.user_playing_status)
+            
+            # 检查并清理孤立的用户状态
+            orphaned_count = await self._cleanup_orphaned_users_internal()
             
             return {
                 'total_connections': total,
                 'busy_connections': busy,
                 'idle_connections': idle,
+                'active_users': active_users,
+                'orphaned_cleaned': orphaned_count,
                 'max_connections': self.max_connections,
-                'min_connections': self.min_connections
+                'min_connections': self.min_connections,
+                'connections': [
+                    {
+                        'id': conn_id[-8:],
+                        'is_busy': conn.is_busy,
+                        'is_connected': conn.is_connected,
+                        'user_id': conn.user_id[-8:] if conn.user_id else None,
+                        'error_count': conn.error_count,
+                        'idle_time': int(time.time() - conn.last_used)
+                    }
+                    for conn_id, conn in self.connections.items()
+                ]
             }
+    
+    async def _cleanup_orphaned_users_internal(self):
+        """内部清理孤立用户状态（已持有锁）"""
+        orphaned_users = []
+        for user_id, conn in list(self.user_playing_status.items()):
+            # 检查连接是否还存在于连接池中
+            conn_exists = any(c for c in self.connections.values() if c == conn)
+            if not conn_exists:
+                orphaned_users.append(user_id)
+        
+        for user_id in orphaned_users:
+            del self.user_playing_status[user_id]
+            logger.warning(f"清理孤立的用户TTS状态: {user_id}")
+        
+        return len(orphaned_users)
+    
+    async def cleanup_orphaned_users(self):
+        """公开的清理孤立用户状态方法"""
+        async with self._lock:
+            return await self._cleanup_orphaned_users_internal()
     
     async def shutdown(self):
         """关闭连接池"""
@@ -366,6 +411,7 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         logger.warning(f"无法获取TTS连接，用户: {user_id}")
         return False
     
+    connection_created = False
     try:
         # 记录用户播放状态
         async with pool._lock:
@@ -380,13 +426,33 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         
         def on_error(error):
             logger.error(f"TTS合成错误: {error}")
-            asyncio.create_task(pool.handle_connection_error(conn, error))
+            # 避免在回调中使用异步任务，直接记录错误
+            conn.error_count += 1
         
         def on_end():
             logger.debug(f"TTS播放结束，用户: {user_id}")
         
-        # 连接并合成
-        await conn.tts_client.connect()
+        # 检查连接状态，只在需要时才连接
+        try:
+            # 先检查内部状态标记
+            if not conn.is_connected:
+                # 再检查实际WebSocket状态
+                if hasattr(conn.tts_client, '_ws') and conn.tts_client._ws and not conn.tts_client._ws.closed:
+                    conn.is_connected = True
+                elif hasattr(conn.tts_client, 'connected') and conn.tts_client.connected:
+                    conn.is_connected = True
+        except (AttributeError, Exception):
+            conn.is_connected = False
+        
+        if not conn.is_connected:
+            logger.debug(f"🔗 为用户 {user_id} 建立TTS连接")
+            await conn.tts_client.connect()
+            conn.is_connected = True
+            connection_created = True
+        else:
+            logger.debug(f"♻️ 复用现有TTS连接，用户: {user_id}")
+        
+        # 设置回调（无论是新连接还是复用的连接都需要设置）
         conn.tts_client.send_audio = on_audio
         conn.tts_client.on_error = on_error
         conn.tts_client.on_end = on_end
@@ -400,6 +466,7 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         
     except Exception as e:
         logger.error(f"TTS合成异常: {e}")
+        # 处理连接错误时不使用异步任务
         await pool.handle_connection_error(conn, e)
         return False
     finally:

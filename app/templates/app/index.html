@@ -197,7 +197,7 @@
                 <button id="streamBtn" class="btn" onclick="toggleStreamMode()">开始持续对话</button>
                 <button id="resetBtn" class="btn" onclick="resetConversation()" style="background-color: #6c757d;">重置对话</button>
                 <button id="testBtn" class="btn" onclick="testLLM()" style="background-color: #ffc107;">测试LLM</button>
-                <button id="configBtn" class="btn" onclick="toggleAudioConfig()" style="background-color: #17a2b8;">音频设置</button>
+                <button id="configBtn" class="btn" onclick="ConfigManager.toggleAudioConfig()" style="background-color: #17a2b8;">音频设置</button>
                 <button id="ttsBtn" class="btn" onclick="toggleTTS()" style="background-color: #28a745;">🔊 TTS开启</button>
                 <button id="stopTtsBtn" class="btn" onclick="stopTTS()" style="background-color: #dc3545; display: none;">🛑 停止播放</button>
                 <button id="diagnosisBtn" class="btn" onclick="runDiagnosis()" style="background-color: #17a2b8;">🔍 连接诊断</button>
@@ -209,7 +209,7 @@
                 <div style="text-align: left; margin: 10px 0;">
                     <label style="display: block; margin: 5px 0;">
                         📊 采样率: 
-                        <select id="sampleRateSelect" onchange="updateAudioConfig()" style="margin-left: 10px; padding: 5px;">
+                        <select id="sampleRateSelect" onchange="ConfigManager.updateAudioConfig()" style="margin-left: 10px; padding: 5px;">
                             <option value="8000">8kHz (电话质量)</option>
                             <option value="16000" selected>16kHz (标准质量)</option>
                             <option value="22050">22kHz (高质量)</option>
@@ -217,7 +217,7 @@
                     </label>
                     <label style="display: block; margin: 5px 0;">
                         ⏱️ 发送间隔: 
-                        <select id="sendIntervalSelect" onchange="updateAudioConfig()" style="margin-left: 10px; padding: 5px;">
+                        <select id="sendIntervalSelect" onchange="ConfigManager.updateAudioConfig()" style="margin-left: 10px; padding: 5px;">
                             <option value="50">50ms (实时性好)</option>
                             <option value="100" selected>100ms (平衡)</option>
                             <option value="200">200ms (省带宽)</option>
