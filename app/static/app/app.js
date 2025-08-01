@@ -2160,6 +2160,8 @@ const TTSManager = {
     isPlaying: false,
     currentSources: [], // 当前播放的音频源
     isInterrupted: false, // 是否被中断
+    audioBufferQueue: [], // 音频缓冲区队列
+    isProcessingQueue: false, // 是否正在处理队列
     
     /**
      * 初始化音频上下文
@@ -2214,16 +2216,18 @@ const TTSManager = {
             console.log('📦 Base64解码完成，音频数据大小:', audioData.byteLength, '字节');
             
             if (format === 'pcm') {
-                // 处理PCM格式的音频数据
-                console.log('🎵 开始播放PCM音频...');
-                await this.playPCMAudio(audioData, sampleRate);
+                // 创建音频缓冲区并加入队列
+                const audioBuffer = await this.createPCMAudioBuffer(audioData, sampleRate);
+                if (audioBuffer) {
+                    console.log('📋 音频片段加入队列，时长:', audioBuffer.duration.toFixed(3), '秒');
+                    this.audioBufferQueue.push(audioBuffer);
+                    this.processAudioQueue(); // 开始处理队列
+                }
             } else {
                 // 处理其他格式的音频数据
                 console.log('🎵 开始播放其他格式音频...');
                 await this.playDecodedAudio(audioData);
             }
-            
-            console.log('✅ 音频播放完成');
             
         } catch (error) {
             console.error('❌ 播放TTS音频失败:', error);
@@ -2231,23 +2235,13 @@ const TTSManager = {
     },
     
     /**
-     * 播放PCM格式的音频数据
+     * 创建PCM音频缓冲区（不立即播放）
      */
-    async playPCMAudio(arrayBuffer, sampleRate) {
+    async createPCMAudioBuffer(arrayBuffer, sampleRate) {
         try {
-            console.log('🔧 开始处理PCM音频数据:', {
-                原始数据大小: arrayBuffer.byteLength + ' 字节',
-                采样率: sampleRate + ' Hz'
-            });
-            
             // 将ArrayBuffer转换为Float32Array
             const int16Array = new Int16Array(arrayBuffer);
             const float32Array = new Float32Array(int16Array.length);
-            
-            console.log('📊 PCM数据转换:', {
-                样本数量: int16Array.length,
-                音频时长: (int16Array.length / sampleRate).toFixed(2) + ' 秒'
-            });
             
             // 转换16位整数到浮点数 (-1.0 到 1.0)
             for (let i = 0; i < int16Array.length; i++) {
@@ -2258,16 +2252,59 @@ const TTSManager = {
             const audioBuffer = this.audioContext.createBuffer(1, float32Array.length, sampleRate);
             audioBuffer.getChannelData(0).set(float32Array);
             
-            console.log('🎼 音频缓冲区创建完成，开始播放...');
+            return audioBuffer;
             
-            // 播放音频
-            await this.playAudioBuffer(audioBuffer);
+        } catch (error) {
+            console.error('❌ 创建PCM音频缓冲区失败:', error);
+            return null;
+        }
+    },
+
+    /**
+     * 播放PCM格式的音频数据（保留原方法用于兼容）
+     */
+    async playPCMAudio(arrayBuffer, sampleRate) {
+        try {
+            console.log('🔧 开始处理PCM音频数据:', {
+                原始数据大小: arrayBuffer.byteLength + ' 字节',
+                采样率: sampleRate + ' Hz'
+            });
             
-            console.log('🎵 PCM音频播放完成');
+            const audioBuffer = await this.createPCMAudioBuffer(arrayBuffer, sampleRate);
+            if (audioBuffer) {
+                console.log('🎼 音频缓冲区创建完成，开始播放...');
+                await this.playAudioBuffer(audioBuffer);
+                console.log('🎵 PCM音频播放完成');
+            }
             
         } catch (error) {
             console.error('❌ 播放PCM音频失败:', error);
         }
+    },
+
+    /**
+     * 处理音频队列，实现无缝播放
+     */
+    async processAudioQueue() {
+        if (this.isProcessingQueue || this.audioBufferQueue.length === 0) {
+            return;
+        }
+        
+        this.isProcessingQueue = true;
+        console.log('🎵 开始处理音频队列，当前队列长度:', this.audioBufferQueue.length);
+        
+        while (this.audioBufferQueue.length > 0 && !this.isInterrupted) {
+            const audioBuffer = this.audioBufferQueue.shift();
+            console.log('▶️ 播放队列中的音频片段，时长:', audioBuffer.duration.toFixed(3), '秒，剩余队列:', this.audioBufferQueue.length);
+            
+            await this.playAudioBuffer(audioBuffer);
+            
+            // 小延迟确保无缝连接
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        
+        this.isProcessingQueue = false;
+        console.log('✅ 音频队列处理完成');
     },
     
     /**
@@ -2352,6 +2389,8 @@ const TTSManager = {
     stopAll() {
         this.isInterrupted = true;
         this.audioQueue = [];
+        this.audioBufferQueue = []; // 清空音频缓冲区队列
+        this.isProcessingQueue = false; // 停止队列处理
         
         // 停止所有当前播放的音频源
         this.currentSources.forEach(source => {
@@ -2369,7 +2408,7 @@ const TTSManager = {
             this.audioContext.suspend();
         }
         
-        console.log('🔇 已停止所有TTS播放');
+        console.log('🔇 已停止所有TTS播放，清空音频队列');
     },
     
     /**
@@ -2378,13 +2417,15 @@ const TTSManager = {
     startNewTTS() {
         this.stopAll();
         this.isInterrupted = false;
+        this.audioBufferQueue = []; // 确保队列为空
+        this.isProcessingQueue = false;
         
         // 恢复音频上下文
         if (this.audioContext && this.audioContext.state === 'suspended') {
             this.audioContext.resume();
         }
         
-        console.log('🎵 开始新的TTS播放');
+        console.log('🎵 开始新的TTS播放，重置音频队列');
     },
     
     /**
