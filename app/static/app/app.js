@@ -17,7 +17,7 @@ const CONSTANTS = {
     AUDIO_DEFAULTS: {
         SAMPLE_RATE: 16000,
         CHUNK_SIZE: 4096,
-        SEND_INTERVAL: 100
+        SEND_INTERVAL: 50  // 优化为50ms提高实时性
     },
     
     // 文件上传限制
@@ -452,6 +452,16 @@ const WebSocketManager = {
                 }
             };
             
+            // 添加连接状态监控
+            const statusInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+                    clearInterval(statusInterval);
+                    console.warn('🔌 WebSocket连接已断开');
+                } else if (ws.readyState === WebSocket.OPEN) {
+                    console.debug('✅ WebSocket连接正常');
+                }
+            }, 5000); // 每5秒检查一次
+            
             ws.onclose = (event) => {
                 clearTimeout(connectTimeout);
                 console.log('WebSocket连接已关闭:', event.code, event.reason);
@@ -723,6 +733,12 @@ class AudioBufferManager {
      */
     processAudioData(newData, websocket) {
         try {
+            // 检查WebSocket连接状态
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                console.warn('⚠️ WebSocket连接不可用，跳过音频数据发送');
+                return;
+            }
+            
             // 缓冲数据
             this.audioBuffer = this.combineArrays(this.audioBuffer, newData);
             
@@ -731,9 +747,15 @@ class AudioBufferManager {
             if (now - this.lastSendTime >= appState.audioConfig.sendInterval && this.audioBuffer.length > 0) {
                 const dataToSend = this.prepareDataForSending();
                 
-                websocket.send(dataToSend.buffer);
-                this.audioBuffer = new Int16Array(0);  // 清空缓冲
-                this.lastSendTime = now;
+                try {
+                    websocket.send(dataToSend.buffer);
+                    console.debug('📤 发送音频数据:', dataToSend.length, '字节');
+                    this.audioBuffer = new Int16Array(0);  // 清空缓冲
+                    this.lastSendTime = now;
+                } catch (sendError) {
+                    console.error('❌ 发送音频数据失败:', sendError);
+                    // 不清空缓冲，下次重试
+                }
             }
         } catch (error) {
             console.error('处理音频数据失败:', error);
@@ -1005,6 +1027,40 @@ const MessageHandler = {
             DOMUtils.updateTexts({
                 status: `🛑 TTS播放已中断: ${data.reason}`
             });
+        },
+        
+        'diagnosis_result': function(data) {
+            console.log('🔍 收到后端诊断结果:', data.diagnosis_info);
+            
+            const info = data.diagnosis_info;
+            console.log('📊 后端状态详情:');
+            console.log(`  - 用户ID: ${info.user_id}`);
+            console.log(`  - WebSocket连接: ${info.websocket_connected ? '✅ 已连接' : '❌ 未连接'}`);
+            console.log(`  - ASR连接: ${info.asr_connected ? '✅ 已连接' : '❌ 未连接'}`);
+            console.log(`  - FunASR客户端: ${info.funasr_client_connected ? '✅ 已连接' : '❌ 未连接'}`);
+            console.log(`  - 服务运行状态: ${info.is_running ? '✅ 运行中' : '❌ 已停止'}`);
+            console.log(`  - 时间差: ${info.server_timestamp - info.timestamp}ms`);
+            
+            if (info.connection_pool) {
+                console.log('🏊 连接池状态:', info.connection_pool);
+            }
+        },
+        
+        'asr_error': function(data) {
+            console.warn('⚠️ ASR服务错误:', data.message);
+            
+            DOMUtils.updateTexts({
+                status: `⚠️ ${data.message}`
+            });
+            
+            // 显示用户友好的错误提示
+            if (isStreaming) {
+                setTimeout(() => {
+                    DOMUtils.updateTexts({
+                        status: CONSTANTS.STATUS_TEXT.LISTENING
+                    });
+                }, 3000); // 3秒后恢复正常状态显示
+            }
         },
         
         'ai_chunk': function(data) {
@@ -2455,4 +2511,88 @@ const TTSManager = {
                    .toggleClass('active', appState.ttsEnabled);
         }
     }
-}; 
+};
+
+// ===========================
+// 连接诊断功能
+// ===========================
+async function runDiagnosis() {
+    const $btn = $('#diagnosisBtn');
+    const originalText = $btn.text();
+    
+    $btn.text('🔍 诊断中...').prop('disabled', true);
+    
+    console.log('🔍 开始连接诊断...');
+    
+    // 1. 检查WebSocket连接状态
+    console.log('📡 WebSocket状态检查:');
+    if (websocket) {
+        console.log(`  - 连接状态: ${getWebSocketStateName(websocket.readyState)}`);
+        console.log(`  - URL: ${websocket.url}`);
+    } else {
+        console.log('  - WebSocket: 未连接');
+    }
+    
+    // 2. 检查音频录制状态
+    console.log('🎤 音频录制状态检查:');
+    console.log(`  - 流媒体状态: ${isStreaming ? '运行中' : '已停止'}`);
+    console.log(`  - 音频流: ${audioStream ? '已获取' : '未获取'}`);
+    console.log(`  - 音频处理器: ${appState.audioProcessor ? '已创建' : '未创建'}`);
+    
+    // 3. 检查用户权限
+    console.log('🔐 权限检查:');
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('  - 麦克风权限: ✅ 已授权');
+        stream.getTracks().forEach(track => track.stop());
+    } catch (error) {
+        console.log('  - 麦克风权限: ❌ 未授权或不可用');
+        console.error('    错误:', error.message);
+    }
+    
+    // 4. 检查网络连接
+    console.log('🌐 网络连接检查:');
+    console.log(`  - 在线状态: ${navigator.onLine ? '在线' : '离线'}`);
+    
+    // 5. 发送测试消息（如果WebSocket连接正常）
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        console.log('📤 发送诊断测试消息...');
+        try {
+            websocket.send(JSON.stringify({
+                type: 'diagnosis_test',
+                timestamp: Date.now()
+            }));
+            console.log('  - 测试消息发送: ✅ 成功');
+        } catch (error) {
+            console.log('  - 测试消息发送: ❌ 失败');
+            console.error('    错误:', error.message);
+        }
+    }
+    
+    console.log('🔍 诊断完成！请查看控制台输出获取详细信息。');
+    
+    // 显示诊断结果摘要
+    const summary = [
+        `WebSocket: ${websocket ? getWebSocketStateName(websocket.readyState) : '未连接'}`,
+        `音频流: ${isStreaming ? '运行中' : '已停止'}`,
+        `网络: ${navigator.onLine ? '在线' : '离线'}`
+    ].join(' | ');
+    
+    DOMUtils.updateTexts({
+        status: `🔍 诊断完成: ${summary}`
+    });
+    
+    setTimeout(() => {
+        $btn.text(originalText).prop('disabled', false);
+    }, 2000);
+}
+
+function getWebSocketStateName(readyState) {
+    const states = {
+        0: 'CONNECTING',
+        1: 'OPEN',
+        2: 'CLOSING', 
+        3: 'CLOSED'
+    };
+    return states[readyState] || 'UNKNOWN';
+} 

@@ -59,6 +59,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         if self.funasr_task:
             self.funasr_task.cancel()
         
+        # 取消健康检查任务
+        if hasattr(self, 'health_check_task') and self.health_check_task:
+            self.health_check_task.cancel()
+        
         # 根据配置决定如何处理连接
         if self.funasr_client:
             try:
@@ -131,6 +135,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # 启动FunASR响应处理任务
             self.funasr_task = asyncio.create_task(self.handle_funasr_responses())
             
+            # 启动连接健康检查任务
+            self.health_check_task = asyncio.create_task(self.connection_health_check())
+            
         except Exception as asr_error:
             logger.error(f"用户 {self.user_id} 连接FunASR失败: {asr_error}")
             await self.send(text_data=json.dumps({
@@ -187,6 +194,8 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     await self.handle_reset_conversation()
                 elif message_type == 'test_llm':
                     await self.handle_test_llm()
+                elif message_type == 'diagnosis_test':
+                    await self.handle_diagnosis_test(message)
                     
             elif bytes_data:
                 # 处理二进制数据（直接的音频数据）
@@ -199,13 +208,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     
     async def handle_binary_audio_data(self, audio_data):
         """处理二进制音频数据"""
+        logger.debug(f"📤 用户 {self.user_id} 发送音频数据: {len(audio_data)} 字节")
+        
         if not self.asr_connected or not self.funasr_client:
+            logger.warning(f"⚠️ 用户 {self.user_id} ASR未连接，音频数据被丢弃")
             return
         
         try:
             # 检查连接状态
             if not self.funasr_client.is_connected():
-                logger.warning(f"用户 {self.user_id} FunASR连接已断开，尝试重连...")
+                logger.warning(f"🔌 用户 {self.user_id} FunASR连接已断开，尝试重连...")
                 await self.reconnect_funasr()
                 return
             
@@ -214,6 +226,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             
         except Exception as e:
             logger.error(f"处理二进制音频数据失败: {e}")
+            
+            # 向前端发送错误通知
+            await self.send(text_data=json.dumps({
+                "type": "asr_error",
+                "message": "语音识别服务暂时不可用，正在尝试重连...",
+                "error": str(e)
+            }))
+            
             # 连接失败时尝试重连
             await self.reconnect_funasr()
     
@@ -497,6 +517,55 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 }
             }))
     
+    async def handle_diagnosis_test(self, message):
+        """处理连接诊断测试"""
+        import time
+        try:
+            timestamp = message.get('timestamp', 0)
+            logger.info(f"🔍 收到用户 {self.user_id} 的诊断测试消息，时间戳: {timestamp}")
+            
+            # 收集后端状态信息
+            diagnosis_info = {
+                "user_id": self.user_id,
+                "websocket_connected": True,
+                "asr_connected": self.asr_connected,
+                "funasr_client_connected": self.funasr_client.is_connected() if self.funasr_client else False,
+                "is_running": self.is_running,
+                "timestamp": timestamp,
+                "server_timestamp": int(time.time() * 1000)
+            }
+            
+            # 获取连接池状态（如果使用连接池）
+            try:
+                from .utils import get_system_config_async
+                config = await get_system_config_async()
+                
+                if config.use_connection_pool:
+                    pool = await get_connection_pool()
+                    pool_stats = pool.get_stats()
+                    diagnosis_info["connection_pool"] = pool_stats
+                else:
+                    diagnosis_info["connection_pool"] = {"mode": "independent"}
+                    
+            except Exception as e:
+                logger.error(f"获取连接池状态失败: {e}")
+                diagnosis_info["connection_pool"] = {"error": str(e)}
+            
+            await self.send(text_data=json.dumps({
+                "type": "diagnosis_result",
+                "message": "后端诊断完成",
+                "diagnosis_info": diagnosis_info
+            }))
+            
+            logger.info(f"✅ 用户 {self.user_id} 诊断信息已发送")
+            
+        except Exception as e:
+            logger.error(f"处理诊断测试失败: {e}")
+            await self.send(text_data=json.dumps({
+                "type": "error",
+                "message": f"诊断测试失败: {str(e)}"
+            }))
+    
     async def initialize_tts_pool(self):
         """初始化TTS连接池"""
         try:
@@ -506,6 +575,33 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 tts_pool._initialized = True
         except Exception as e:
             logger.error(f"初始化TTS连接池失败: {e}")
+    
+    async def connection_health_check(self):
+        """连接健康检查任务"""
+        while self.is_running:
+            try:
+                await asyncio.sleep(10)  # 每10秒检查一次
+                
+                if not self.is_running:
+                    break
+                
+                # 检查FunASR连接状态
+                if self.funasr_client and not self.funasr_client.is_connected():
+                    logger.warning(f"🔌 用户 {self.user_id} FunASR连接已断开，尝试重连...")
+                    self.asr_connected = False
+                    await self.reconnect_funasr()
+                
+                # 检查任务状态
+                if self.funasr_task and self.funasr_task.done():
+                    logger.warning(f"⚠️ 用户 {self.user_id} FunASR响应处理任务已结束，重新启动...")
+                    self.funasr_task = asyncio.create_task(self.handle_funasr_responses())
+                
+            except asyncio.CancelledError:
+                logger.info(f"用户 {self.user_id} 连接健康检查任务被取消")
+                break
+            except Exception as e:
+                logger.error(f"用户 {self.user_id} 连接健康检查失败: {e}")
+                await asyncio.sleep(5)  # 错误后等待5秒再继续
     
     async def send_tts_interrupt(self, reason=""):
         """发送TTS中断信号给前端"""
