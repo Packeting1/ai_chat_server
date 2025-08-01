@@ -6,7 +6,7 @@ import json
 import asyncio
 import logging
 import base64
-import time # Added for time.time()
+import time
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.exceptions import StopConsumer
 from .utils import session_manager, clean_recognition_text, get_system_config_async
@@ -253,13 +253,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         """处理二进制音频数据"""
         logger.debug(f"📤 用户 {self.user_id} 发送音频数据: {len(audio_data)} 字节")
         
-        # 用户开始说话时立即中断TTS（更早的中断时机）
-        if self.is_ai_speaking and len(audio_data) > 0:
-            await self.send_tts_interrupt("检测到用户音频输入")
-            from .tts_pool import interrupt_user_tts
-            await interrupt_user_tts(self.user_id)
-            logger.debug(f"用户 {self.user_id} 音频输入检测，立即中断TTS播放")
-        
         if not self.asr_connected or not self.funasr_client:
             logger.warning(f"⚠️ 用户 {self.user_id} ASR未连接，音频数据被丢弃")
             return
@@ -296,13 +289,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # 解码Base64音频数据
             audio_data = base64.b64decode(audio_data_b64)
             
-            # 用户开始说话时立即中断TTS（更早的中断时机）
-            if self.is_ai_speaking and len(audio_data) > 0:
-                await self.send_tts_interrupt("检测到用户音频输入")
-                from .tts_pool import interrupt_user_tts
-                await interrupt_user_tts(self.user_id)
-                logger.debug(f"用户 {self.user_id} 音频输入检测，立即中断TTS播放")
-            
             # 检查连接状态
             if not self.funasr_client.is_connected():
                 logger.warning(f"用户 {self.user_id} FunASR连接已断开，尝试重连...")
@@ -331,7 +317,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     if data is None:
                         continue
                     
-                    if "text" in data and not self.is_ai_speaking and self.is_running:
+                    if "text" in data and self.is_running:
                         raw_text = data["text"]
                         mode = data.get("mode", "")
                         
@@ -340,12 +326,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             self.accumulated_text = raw_text
                             display_text = clean_recognition_text(raw_text)
                             
-                            # 用户开始说话时立即中断TTS播放
-                            if display_text and display_text.strip():
+                            # 只有在AI正在说话且识别到有效文本时才中断TTS
+                            if self.is_ai_speaking and display_text and display_text.strip():
                                 await self.send_tts_interrupt("用户开始说话")
                                 from .tts_pool import interrupt_user_tts
                                 await interrupt_user_tts(self.user_id)
-                                logger.debug(f"用户 {self.user_id} 开始说话，中断TTS播放")
+                                logger.info(f"用户 {self.user_id} 开始说话，中断TTS播放")
                             
                             if self.is_running:
                                 await self.send(text_data=json.dumps({
@@ -365,11 +351,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             if display_text and display_text.strip() and display_text != self.last_complete_text:
                                 self.last_complete_text = display_text
                                 
-                                # 用户完成输入时确保TTS已中断
-                                await self.send_tts_interrupt("用户完成输入")
-                                from .tts_pool import interrupt_user_tts
-                                await interrupt_user_tts(self.user_id)
-                                logger.debug(f"用户 {self.user_id} 完成输入，确保TTS中断")
+                                # 如果AI仍在说话，在用户完成输入时确保TTS已中断
+                                if self.is_ai_speaking:
+                                    await self.send_tts_interrupt("用户完成输入")
+                                    from .tts_pool import interrupt_user_tts
+                                    await interrupt_user_tts(self.user_id)
+                                    logger.info(f"用户 {self.user_id} 完成输入，确保TTS中断")
                                 
                                 # 发送最终识别结果
                                 if self.is_running:
@@ -973,14 +960,6 @@ class UploadConsumer(AsyncWebsocketConsumer):
                             
                             if mode == "2pass-online":
                                 # 实时结果
-                                
-                                # 用户开始说话时立即中断TTS播放
-                                if display_text and display_text.strip():
-                                    await self.send_tts_interrupt("用户开始说话")
-                                    from .tts_pool import interrupt_user_tts
-                                    await interrupt_user_tts(self.user_id)
-                                    logger.debug(f"[上传识别] 用户 {self.user_id} 开始说话，中断TTS播放")
-                                
                                 await self.send(text_data=json.dumps({
                                     "type": "recognition_partial",
                                     "text": display_text,
@@ -990,13 +969,6 @@ class UploadConsumer(AsyncWebsocketConsumer):
                             elif mode == "2pass-offline" or mode == "offline":
                                 # 最终结果
                                 accumulated_text += raw_text
-                                
-                                # 用户完成输入时确保TTS已中断
-                                if display_text and display_text.strip():
-                                    await self.send_tts_interrupt("用户完成输入")
-                                    from .tts_pool import interrupt_user_tts
-                                    await interrupt_user_tts(self.user_id)
-                                    logger.debug(f"[上传识别] 用户 {self.user_id} 完成输入，确保TTS中断")
                                 
                                 await self.send(text_data=json.dumps({
                                     "type": "recognition_segment",
