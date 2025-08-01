@@ -127,35 +127,59 @@ class TTSConnectionPool:
             conn.is_connected = False  # 标记为未连接
             
             logger.error(f"❌ TTS连接错误 (错误次数: {conn.error_count}): {error}")
+            logger.error(f"🔍 错误详情: 类型={type(error).__name__}, 完整信息={repr(error)}")
+            logger.error(f"📊 连接信息: 创建时间={time.strftime('%H:%M:%S', time.localtime(conn.created_at))}, "
+                       f"空闲时间={int(time.time() - conn.last_used)}秒")
             
             # 检查错误类型，决定处理策略
             error_str = str(error).lower()
             
+            # 详细分析错误类型
+            if '1007' in error_str:
+                logger.error(f"🚨 检测到1007错误 (Invalid frame payload data): 可能是数据格式问题或API密钥问题")
+            elif '1011' in error_str:
+                logger.error(f"🚨 检测到1011错误 (Internal error): 服务器内部错误")
+            elif 'timeout' in error_str:
+                logger.error(f"🚨 检测到超时错误: 连接或响应超时")
+            elif 'websocket' in error_str or 'connection' in error_str:
+                logger.error(f"🚨 检测到连接错误: WebSocket连接问题")
+            
             # 对于WebSocket相关错误，立即移除连接
             if any(keyword in error_str for keyword in ['1007', 'invalid frame', 'websocket', 'connection', '1011', 'timeout']):
-                logger.warning(f"🔌 检测到WebSocket错误，立即移除连接")
+                logger.warning(f"🔌 检测到严重WebSocket错误，立即移除连接")
                 await self._remove_connection(conn)
                 return
             
             # 对于其他错误，根据错误次数决定
             if conn.error_count >= self.max_error_count:
-                logger.warning(f"⚠️ 连接错误次数过多，移除连接")
+                logger.warning(f"⚠️ 连接错误次数过多({conn.error_count}>={self.max_error_count})，移除连接")
                 await self._remove_connection(conn)
             else:
                 # 尝试重置连接状态
                 try:
+                    logger.info(f"🔄 尝试重置TTS连接状态...")
                     await conn.tts_client.disconnect()
-                    logger.info(f"🔄 重置TTS连接状态")
-                except:
-                    pass
+                    logger.info(f"✅ TTS连接状态重置完成")
+                except Exception as reset_err:
+                    logger.error(f"❌ 重置TTS连接失败: {reset_err}")
     
     async def _create_connection(self) -> Optional[TTSConnection]:
         """创建新的TTS连接"""
         try:
+            logger.info(f"🏗️ 开始创建新的TTS连接...")
+            
             config = await self._get_tts_config()
-            if not config['enabled'] or not config['api_key'] or config['api_key'] == 'your-api-key':
-                logger.warning("TTS未启用或API密钥未配置")
+            logger.info(f"📋 获取TTS配置: 启用={config['enabled']}, 模型={config['model']}, 声音={config['voice']}")
+            
+            if not config['enabled']:
+                logger.warning("⚠️ TTS未启用，跳过连接创建")
                 return None
+                
+            if not config['api_key'] or config['api_key'] == 'your-api-key':
+                logger.error("❌ TTS API密钥未配置或使用默认值")
+                return None
+            
+            logger.info(f"🔑 API密钥已配置，长度: {len(config['api_key'])}")
             
             tts_config = TTSConfig(
                 model=config['model'],
@@ -166,8 +190,10 @@ class TTSConnectionPool:
                 pitch_rate=1.0,
                 audio_format="pcm"
             )
+            logger.info(f"⚙️ TTS配置创建完成: {tts_config}")
             
             # 创建TTS客户端但不立即连接
+            logger.info(f"🔧 创建DashScopeRealtimeTTS客户端...")
             tts_client = DashScopeRealtimeTTS(
                 api_key=config['api_key'],
                 config=tts_config
@@ -182,11 +208,13 @@ class TTSConnectionPool:
             )
             
             self.connections[conn_id] = connection
-            logger.debug(f"✅ 创建TTS连接: {conn_id}")
+            logger.info(f"✅ TTS连接创建成功: {conn_id}, 总连接数: {len(self.connections)}")
             return connection
             
         except Exception as e:
-            logger.error(f"创建TTS连接失败: {e}")
+            logger.error(f"❌ 创建TTS连接失败: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"📜 详细错误堆栈:\n{traceback.format_exc()}")
             return None
     
     async def _remove_connection(self, conn: TTSConnection):
@@ -425,7 +453,17 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
                 logger.error(f"音频回调失败: {e}")
         
         def on_error(error):
-            logger.error(f"TTS合成错误: {error}")
+            logger.error(f"💥 TTS合成错误 (用户: {user_id}): {error}")
+            logger.error(f"📊 错误发生时连接状态: is_connected={conn.is_connected}, error_count={conn.error_count}")
+            
+            # 检查WebSocket状态
+            if hasattr(conn.tts_client, '_ws') and conn.tts_client._ws:
+                try:
+                    ws_state = "open" if not conn.tts_client._ws.closed else "closed"
+                    logger.error(f"🔌 WebSocket状态: {ws_state}")
+                except Exception as ws_err:
+                    logger.error(f"🔌 无法获取WebSocket状态: {ws_err}")
+            
             # 避免在回调中使用异步任务，直接记录错误
             conn.error_count += 1
         
@@ -445,29 +483,60 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
             conn.is_connected = False
         
         if not conn.is_connected:
-            logger.debug(f"🔗 为用户 {user_id} 建立TTS连接")
-            await conn.tts_client.connect()
-            conn.is_connected = True
-            connection_created = True
+            logger.info(f"🔗 为用户 {user_id} 建立TTS连接，配置模型: {conn.config.model}")
+            try:
+                # 获取TTS配置信息用于调试
+                config = await pool._get_tts_config()
+                logger.info(f"📋 TTS配置检查: 启用={config['enabled']}, API密钥长度={len(config['api_key']) if config['api_key'] != 'your-api-key' else 0}")
+                
+                await conn.tts_client.connect()
+                conn.is_connected = True
+                connection_created = True
+                logger.info(f"✅ TTS连接建立成功，用户: {user_id}")
+            except Exception as connect_err:
+                logger.error(f"❌ TTS连接建立失败，用户: {user_id}, 错误: {connect_err}")
+                raise
         else:
-            logger.debug(f"♻️ 复用现有TTS连接，用户: {user_id}")
+            logger.info(f"♻️ 复用现有TTS连接，用户: {user_id}, 连接时长: {time.time() - conn.created_at:.1f}秒")
         
         # 设置回调（无论是新连接还是复用的连接都需要设置）
         conn.tts_client.send_audio = on_audio
         conn.tts_client.on_error = on_error
         conn.tts_client.on_end = on_end
         
+        logger.info(f"🎤 开始TTS合成，用户: {user_id}, 文本长度: {len(text)}, 内容: {text[:50]}...")
+        
+        # 检查连接状态再发送
+        if hasattr(conn.tts_client, '_ws') and conn.tts_client._ws:
+            if conn.tts_client._ws.closed:
+                logger.error(f"⚠️ WebSocket已关闭，重新连接")
+                await conn.tts_client.connect()
+                conn.is_connected = True
+        
+        logger.debug(f"📤 发送TTS文本，用户: {user_id}")
         await conn.tts_client.say(text)
+        
+        logger.debug(f"🔚 结束TTS输入，用户: {user_id}")
         await conn.tts_client.finish()
+        
+        logger.debug(f"⏳ 等待TTS完成，用户: {user_id}")
         await conn.tts_client.wait_done()
         
         logger.info(f"✅ TTS合成完成，用户: {user_id}, 文本: {text[:50]}...")
         return True
         
     except Exception as e:
-        logger.error(f"TTS合成异常: {e}")
+        logger.error(f"💥 TTS合成异常，用户: {user_id}: {type(e).__name__}: {e}")
+        logger.error(f"🔍 异常发生在: 连接建立={'是' if connection_created else '否'}, "
+                   f"连接状态={conn.is_connected if conn else 'N/A'}")
+        
+        # 记录详细的异常堆栈
+        import traceback
+        logger.error(f"📜 异常堆栈:\n{traceback.format_exc()}")
+        
         # 处理连接错误时不使用异步任务
-        await pool.handle_connection_error(conn, e)
+        if conn:
+            await pool.handle_connection_error(conn, e)
         return False
     finally:
         await pool.release_connection(conn, user_id)

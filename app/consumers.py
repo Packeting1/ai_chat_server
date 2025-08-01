@@ -695,11 +695,15 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     async def handle_tts_speak(self, text: str):
         """处理TTS语音合成"""
         try:
+            logger.info(f"🎵 开始TTS语音合成流程，用户: {self.user_id}, 文本长度: {len(text)}")
+            
             # 检查TTS是否启用
             config = await SystemConfig.objects.aget(pk=1)
             if not config.tts_enabled:
-                logger.debug("TTS功能未启用，跳过语音合成")
+                logger.info(f"⚠️ TTS功能未启用，跳过语音合成，用户: {self.user_id}")
                 return
+            
+            logger.info(f"✅ TTS功能已启用，配置检查: 模型={config.tts_voice}, 采样率={config.tts_sample_rate}")
             
             # 发送TTS开始通知
             await self.send(text_data=json.dumps({
@@ -803,7 +807,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             
             try:
                 # 使用TTS连接池进行语音合成
+                logger.info(f"🔗 调用TTS连接池进行语音合成，用户: {self.user_id}")
                 success = await tts_speak_stream(text, self.user_id, on_audio_data)
+                logger.info(f"📊 TTS连接池调用完成，结果: {'成功' if success else '失败'}，用户: {self.user_id}")
             finally:
                 # 停止音频发送任务
                 audio_task.cancel()
@@ -811,6 +817,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     await audio_task
                 except asyncio.CancelledError:
                     pass
+                logger.debug(f"🔄 音频发送任务已停止，用户: {self.user_id}")
             
             # 发送剩余的音频数据
             if audio_buffer:
@@ -822,24 +829,30 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     "sample_rate": sample_rate,
                     "format": "pcm"
                 }))
-                logger.debug(f"发送最后的音频数据: {len(combined_audio)} 字节")
+                logger.info(f"📤 发送最后的音频数据: {len(combined_audio)} 字节，用户: {self.user_id}")
             
             if success:
                 await self.send(text_data=json.dumps({
                     "type": "tts_complete",
                     "message": "语音合成完成"
                 }))
-                logger.info(f"TTS合成成功，用户: {self.user_id}, 文本: {text[:50]}...")
+                logger.info(f"✅ TTS合成成功，用户: {self.user_id}, 文本: {text[:50]}...")
             else:
                 await self.send(text_data=json.dumps({
                     "type": "tts_error",
                     "error": "语音合成失败"
                 }))
+                logger.error(f"❌ TTS合成失败，用户: {self.user_id}, 文本: {text[:50]}...")
                 
         except SystemConfig.DoesNotExist:
-            logger.warning("系统配置不存在，跳过TTS")
+            logger.warning(f"⚠️ 系统配置不存在，跳过TTS，用户: {self.user_id}")
         except Exception as e:
-            logger.error(f"TTS处理异常: {e}")
+            logger.error(f"💥 TTS处理异常，用户: {self.user_id}: {type(e).__name__}: {e}")
+            
+            # 记录详细的异常信息
+            import traceback
+            logger.error(f"📜 TTS异常堆栈:\n{traceback.format_exc()}")
+            
             await self.send(text_data=json.dumps({
                 "type": "tts_error",
                 "error": f"语音合成异常: {str(e)}"
