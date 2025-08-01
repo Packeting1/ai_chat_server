@@ -976,9 +976,6 @@ const MessageHandler = {
             // 开始新的TTS播放
             TTSManager.startNewTTS();
             
-            // 显示停止按钮
-            $('#stopTtsBtn').show();
-            
             DOMUtils.updateTexts({
                 status: '🔊 正在合成语音...'
             });
@@ -997,9 +994,6 @@ const MessageHandler = {
         
         'tts_complete': function(data) {
             console.log('TTS合成完成:', data.message);
-            
-            // 隐藏停止按钮
-            $('#stopTtsBtn').hide();
             
             // 短暂显示完成状态
             DOMUtils.updateTexts({
@@ -1024,9 +1018,6 @@ const MessageHandler = {
             // 停止所有TTS播放
             TTSManager.stopAll();
             
-            // 隐藏停止按钮
-            $('#stopTtsBtn').hide();
-            
             // 恢复状态，让用户知道可以继续对话
             DOMUtils.updateTexts({
                 status: '⚠️ 语音合成失败，但可以继续对话'
@@ -1049,9 +1040,6 @@ const MessageHandler = {
             
             // 立即停止TTS播放
             TTSManager.stopAll();
-            
-            // 隐藏停止按钮
-            $('#stopTtsBtn').hide();
             
             DOMUtils.updateTexts({
                 status: `🛑 TTS播放已中断: ${data.reason}`
@@ -1098,15 +1086,6 @@ const MessageHandler = {
         
         'ai_response_complete': function(data) {
             console.log('AI回答完成（含TTS处理）:', data.message);
-            
-            // 注意：不要停止TTS播放！让音频自然播放完毕
-            // TTSManager.stopAll(); // 移除这行，让TTS继续播放
-            
-            // 隐藏停止按钮（TTS播放完毕后会自动处理）
-            // $('#stopTtsBtn').hide(); // 让TTS播放完成后自动隐藏
-            
-            // 不要立即恢复到监听状态，等TTS播放完毕
-            // 状态恢复将由tts_complete处理器处理
             
             // 完成AI回答（这个可以立即执行，表示AI文本回答完成）
             this.completeAIResponse();
@@ -1436,18 +1415,7 @@ function toggleTTS() {
     console.log(`TTS功能${enabled ? '已启用' : '已禁用'}`);
 }
 
-function stopTTS() {
-    TTSManager.stopAll();
-    
-    // 隐藏停止按钮
-    $('#stopTtsBtn').hide();
-    
-    // 更新状态显示
-    $('#status').text('🔇 TTS播放已停止');
-    $('#currentText').text('语音播放已手动停止');
-    
-    console.log('🛑 用户手动停止TTS播放');
-}
+
 
 // ===========================
 // 文件上传处理模块
