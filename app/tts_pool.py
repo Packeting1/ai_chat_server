@@ -145,11 +145,7 @@ async def tts_speak_stream(text: str, user_id: str, audio_callback: Callable[[by
         tts_config = TTSConfig(
             model=config['model'],
             voice=config['voice'],
-            sample_rate=config['sample_rate'],
-            speed_rate=1.0,
-            volume_rate=1.0,
-            pitch_rate=1.0,
-            audio_format="pcm"
+            sample_rate=config['sample_rate']
         )
         
         # 创建TTS客户端
