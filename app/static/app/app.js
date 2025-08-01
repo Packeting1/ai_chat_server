@@ -1058,26 +1058,7 @@ const MessageHandler = {
             });
         },
         
-        'diagnosis_result': function(data) {
-            console.log('🔍 收到后端诊断结果:', data.diagnosis_info);
-            
-            const info = data.diagnosis_info;
-            console.log('📊 后端状态详情:');
-            console.log(`  - 用户ID: ${info.user_id}`);
-            console.log(`  - WebSocket连接: ${info.websocket_connected ? '✅ 已连接' : '❌ 未连接'}`);
-            console.log(`  - ASR连接: ${info.asr_connected ? '✅ 已连接' : '❌ 未连接'}`);
-            console.log(`  - FunASR客户端: ${info.funasr_client_connected ? '✅ 已连接' : '❌ 未连接'}`);
-            console.log(`  - 服务运行状态: ${info.is_running ? '✅ 运行中' : '❌ 已停止'}`);
-            console.log(`  - 时间差: ${info.server_timestamp - info.timestamp}ms`);
-            
-            if (info.connection_pool) {
-                console.log('🏊 ASR连接池状态:', info.connection_pool);
-            }
-            
-            if (info.tts_pool) {
-                console.log('🎵 TTS连接池状态:', info.tts_pool);
-            }
-        },
+
         
         'asr_error': function(data) {
             console.warn('⚠️ ASR服务错误:', data.message);
@@ -1096,21 +1077,7 @@ const MessageHandler = {
             }
         },
         
-        'tts_pool_reset': function(data) {
-            console.log('✅ TTS连接池重置成功:', data.message);
-            
-            DOMUtils.updateTexts({
-                status: `✅ ${data.message}`
-            });
-            
-            setTimeout(() => {
-                if (isStreaming) {
-                    DOMUtils.updateTexts({
-                        status: CONSTANTS.STATUS_TEXT.LISTENING
-                    });
-                }
-            }, 2000);
-        },
+
         
         'ai_chunk': function(data) {
             this.processAIChunk(data.content);
@@ -2633,157 +2600,9 @@ const TTSManager = {
     },
     
 
-    
-    /**
-     * 获取音频播放性能报告
-     */
-    getPerformanceReport() {
-        const now = Date.now();
-        const timeSinceLastUpdate = now - this.playbackStats.lastUpdateTime;
-        
-        return {
-            isPlaying: this.isPlaying,
-            queueLength: this.audioBufferQueue.length,
-            isProcessingQueue: this.isProcessingQueue,
-            totalChunks: this.playbackStats.totalChunks,
-            totalDuration: this.playbackStats.totalDuration.toFixed(2),
-            averageChunkDuration: this.playbackStats.averageChunkDuration.toFixed(3),
-            timeSinceLastUpdate: timeSinceLastUpdate,
-            audioContextState: this.audioContext ? this.audioContext.state : 'null',
-            currentSourcesCount: this.currentSources.length
-        };
-    },
-    
-    /**
-     * 显示性能报告
-     */
-    showPerformanceReport() {
-        const report = this.getPerformanceReport();
-        console.log('📊 TTS播放性能报告:', report);
-        
-        // 更新UI状态（如果有相关元素）
-        if (window.DOMUtils) {
-            DOMUtils.updateTexts({
-                status: `🎵 TTS播放中 - 队列:${report.queueLength} 片段:${report.totalChunks} 时长:${report.totalDuration}s`
-            });
-        }
-    },
+
 };
 
-// ===========================
-// 连接诊断功能
-// ===========================
-async function runDiagnosis() {
-    console.log('🔍 开始连接诊断...');
-    
-    const results = {
-        websocket: false,
-        audioRecording: false,
-        micPermission: false,
-        network: false,
-        tts: false
-    };
-    
-    try {
-        // 1. 检查WebSocket连接
-        if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
-            results.websocket = true;
-            console.log('✅ WebSocket连接正常');
-        } else {
-            console.warn('❌ WebSocket连接异常:', appState.websocket ? getWebSocketStateName(appState.websocket.readyState) : '未连接');
-        }
-        
-        // 2. 检查音频录制功能
-        if (appState.mediaRecorder && appState.mediaRecorder.state === 'recording') {
-            results.audioRecording = true;
-            console.log('✅ 音频录制正常');
-        } else {
-            console.warn('❌ 音频录制异常:', appState.mediaRecorder ? appState.mediaRecorder.state : '未初始化');
-        }
-        
-        // 3. 检查麦克风权限
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            results.micPermission = true;
-            console.log('✅ 麦克风权限正常');
-            stream.getTracks().forEach(track => track.stop());
-        } catch (error) {
-            console.warn('❌ 麦克风权限异常:', error.message);
-        }
-        
-        // 4. 检查网络连接
-        try {
-            const response = await fetch('/api/pool/stats/', { method: 'GET' });
-            if (response.ok) {
-                results.network = true;
-                console.log('✅ 网络连接正常');
-            } else {
-                console.warn('❌ 网络连接异常:', response.status);
-            }
-        } catch (error) {
-            console.warn('❌ 网络连接异常:', error.message);
-        }
-        
-        // 5. 检查TTS功能
-        if (TTSManager.audioContext && TTSManager.audioContext.state === 'running') {
-            results.tts = true;
-            console.log('✅ TTS音频上下文正常');
-            
-            // 显示TTS性能报告
-            TTSManager.showPerformanceReport();
-        } else {
-            console.warn('❌ TTS音频上下文异常:', TTSManager.audioContext ? TTSManager.audioContext.state : '未初始化');
-        }
-        
-        // 发送诊断结果到后端
-        if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
-            appState.websocket.send(JSON.stringify({
-                type: 'diagnosis_test',
-                results: results
-            }));
-        }
-        
-        console.log('📊 诊断完成:', results);
-        
-    } catch (error) {
-        console.error('❌ 诊断过程出错:', error);
-    }
-}
 
-function getWebSocketStateName(readyState) {
-    const states = {
-        0: 'CONNECTING',
-        1: 'OPEN',
-        2: 'CLOSING', 
-        3: 'CLOSED'
-    };
-    return states[readyState] || 'UNKNOWN';
-}
 
-// TTS连接池重置功能
-async function resetTtsPool() {
-    const $btn = $('#resetTtsPoolBtn');
-    const originalText = $btn.text();
-    
-    $btn.text('🔄 重置中...').prop('disabled', true);
-    
-    console.log('🔄 开始重置TTS连接池...');
-    
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
-        try {
-            websocket.send(JSON.stringify({
-                type: 'reset_tts_pool',
-                timestamp: Date.now()
-            }));
-            console.log('📤 发送TTS连接池重置请求');
-        } catch (error) {
-            console.error('❌ 发送TTS连接池重置请求失败:', error);
-        }
-    } else {
-        console.warn('⚠️ WebSocket连接不可用，无法重置TTS连接池');
-    }
-    
-    setTimeout(() => {
-        $btn.text(originalText).prop('disabled', false);
-    }, 3000);
-} 
+ 

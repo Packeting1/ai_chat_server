@@ -235,10 +235,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     await self.handle_reset_conversation()
                 elif message_type == 'test_llm':
                     await self.handle_test_llm()
-                elif message_type == 'diagnosis_test':
-                    await self.handle_diagnosis_test(message)
-                elif message_type == 'reset_tts_pool':
-                    await self.handle_reset_tts_pool()
                     
             elif bytes_data:
                 # 处理二进制数据（直接的音频数据）
@@ -574,79 +570,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 }
             }))
     
-    async def handle_diagnosis_test(self, message):
-        """处理连接诊断测试"""
-        import time
-        try:
-            timestamp = message.get('timestamp', 0)
-            logger.info(f"🔍 收到用户 {self.user_id} 的诊断测试消息，时间戳: {timestamp}")
-            
-            # 收集后端状态信息
-            diagnosis_info = {
-                "user_id": self.user_id,
-                "websocket_connected": True,
-                "asr_connected": self.asr_connected,
-                "funasr_client_connected": self.funasr_client.is_connected() if self.funasr_client else False,
-                "is_running": self.is_running,
-                "timestamp": timestamp,
-                "server_timestamp": int(time.time() * 1000)
-            }
-            
-            # 获取连接池状态（如果使用连接池）
-            try:
-                config = await get_system_config_async()
-                
-                if config.use_connection_pool:
-                    pool = await get_connection_pool()
-                    pool_stats = pool.get_stats()
-                    diagnosis_info["connection_pool"] = pool_stats
-                else:
-                    diagnosis_info["connection_pool"] = {"mode": "independent"}
-                
-                # 获取TTS连接池状态
-                tts_pool = await get_tts_pool()
-                tts_stats = await tts_pool.get_stats()
-                diagnosis_info["tts_pool"] = tts_stats
-                    
-            except Exception as e:
-                logger.error(f"获取连接池状态失败: {e}")
-                diagnosis_info["connection_pool"] = {"error": str(e)}
-                diagnosis_info["tts_pool"] = {"error": str(e)}
-            
-            await self.send(text_data=json.dumps({
-                "type": "diagnosis_result",
-                "message": "后端诊断完成",
-                "diagnosis_info": diagnosis_info
-            }))
-            
-            logger.info(f"✅ 用户 {self.user_id} 诊断信息已发送")
-            
-        except Exception as e:
-            logger.error(f"处理诊断测试失败: {e}")
-            await self.send(text_data=json.dumps({
-                "type": "error",
-                "message": f"诊断测试失败: {str(e)}"
-            }))
+
     
-    async def handle_reset_tts_pool(self):
-        """重置TTS连接池"""
-        try:
-            tts_pool = await get_tts_pool()
-            await tts_pool.reset_pool()
-            
-            await self.send(text_data=json.dumps({
-                "type": "tts_pool_reset",
-                "message": "TTS连接池已重置"
-            }))
-            
-            logger.info(f"✅ 用户 {self.user_id} TTS连接池重置完成")
-            
-        except Exception as e:
-            logger.error(f"重置TTS连接池失败: {e}")
-            await self.send(text_data=json.dumps({
-                "type": "error",
-                "message": f"重置TTS连接池失败: {str(e)}"
-            }))
+
     
     async def initialize_tts_pool(self):
         """初始化TTS连接池"""
