@@ -457,10 +457,8 @@ const WebSocketManager = {
                 if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
                     clearInterval(statusInterval);
                     console.warn('🔌 WebSocket连接已断开');
-                } else if (ws.readyState === WebSocket.OPEN) {
-                            // console.debug('✅ WebSocket连接正常'); // 减少调试日志
-    }
-}, 5000); // 每5秒检查一次
+                }
+            }, 5000); // 每5秒检查一次
             
             ws.onclose = (event) => {
                 clearTimeout(connectTimeout);
@@ -749,7 +747,6 @@ class AudioBufferManager {
                 
                 try {
                     websocket.send(dataToSend.buffer);
-                    // console.debug('📤 发送音频数据:', dataToSend.length, '字节'); // 减少调试日志
                     this.audioBuffer = new Int16Array(0);  // 清空缓冲
                     this.lastSendTime = now;
                 } catch (sendError) {
@@ -793,8 +790,6 @@ async function startContinuousRecording() {
         // 创建音频处理器
         await AudioManager.createAudioProcessor(audioContext, source);
         
-        // console.log('音频录制已启动，采样率:', audioContext.sampleRate); // 减少调试日志
-        
     } catch (error) {
         console.error('启动录音失败:', error);
         throw error;
@@ -829,7 +824,6 @@ const ResourceManager = {
             try {
                 audioStream.getTracks().forEach(track => {
                     track.stop();
-                    // console.log('音频轨道已停止:', track.kind); // 减少调试日志
                 });
             } catch (error) {
                 console.error('停止音频轨道时出错:', error);
@@ -885,8 +879,6 @@ const ResourceManager = {
 };
 
 function stopStreaming() {
-            // console.log('停止流式对话...'); // 减少调试日志
-    
     // 更新状态
     isStreaming = false;
     conversationCount = 0;
@@ -916,8 +908,6 @@ const MessageHandler = {
      * 主消息处理入口
      */
     handleMessage(data) {
-        // console.log('收到WebSocket消息:', data.type, data); // 减少调试日志
-        
         const handler = this.messageHandlers[data.type];
         if (handler) {
             handler.call(this, data);
@@ -982,13 +972,6 @@ const MessageHandler = {
         },
         
         'tts_audio': function(data) {
-            // console.log('🎵 收到TTS音频数据:', {
-            //     音频数据长度: data.audio_data.length + ' 字符',
-            //     采样率: data.sample_rate + ' Hz',
-            //     格式: data.format,
-            //     Base64前缀: data.audio_data.substring(0, 50) + '...',
-            //     时间戳: new Date().toISOString()
-            // }); // 减少调试日志
             TTSManager.playAudioData(data.audio_data, data.sample_rate, data.format);
         },
         
@@ -2150,10 +2133,6 @@ function addTypingEffect($element, text) {
     scrollToBottom();
 }
 
-
-
-
-
 // ===========================
 // 应用初始化
 // ===========================
@@ -2182,8 +2161,6 @@ $(document).ready(async function() {
             animation: blink 1s infinite;
         }
     `).appendTo('head');
-    
-            // console.log('✅ 应用初始化完成，jQuery已加载'); // 减少调试日志
 });
 
 // ===========================
@@ -2233,7 +2210,6 @@ const TTSManager = {
         if (!this.audioContext) {
             try {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                // console.log('🔊 TTS音频上下文初始化成功'); // 减少调试日志
             } catch (error) {
                 console.error('初始化音频上下文失败:', error);
                 return false;
@@ -2257,43 +2233,29 @@ const TTSManager = {
      * 播放Base64编码的音频数据
      */
     async playAudioData(audioBase64, sampleRate = 22050, format = 'pcm') {
-        // console.log('🎧 TTSManager.playAudioData 被调用:', {
-        //     Base64长度: audioBase64.length,
-        //     采样率: sampleRate,
-        //     格式: format,
-        //     TTS启用状态: appState.ttsEnabled,
-        //     是否被中断: this.isInterrupted
-        // }); // 减少调试日志
         
         if (!appState.ttsEnabled || this.isInterrupted) {
-            // console.log('⚠️ TTS已禁用或被中断，跳过音频播放'); // 减少调试日志
             return;
         }
         
         try {
             // 初始化音频上下文
             if (!(await this.initAudioContext())) {
-                // console.log('❌ 音频上下文初始化失败'); // 减少调试日志
                 return;
             }
             
-            // console.log('✅ 音频上下文初始化成功，开始解码音频数据...'); // 减少调试日志
-            
             // 解码Base64音频数据
             const audioData = this.base64ToArrayBuffer(audioBase64);
-            // console.log('📦 Base64解码完成，音频数据大小:', audioData.byteLength, '字节'); // 减少调试日志
             
             if (format === 'pcm') {
                 // 创建音频缓冲区并加入队列
                 const audioBuffer = await this.createPCMAudioBuffer(audioData, sampleRate);
                 if (audioBuffer) {
-                    // console.log('📋 音频片段加入队列，时长:', audioBuffer.duration.toFixed(3), '秒'); // 减少调试日志
                     this.audioBufferQueue.push(audioBuffer);
                     this.processAudioQueue(); // 开始处理队列
                 }
             } else {
                 // 处理其他格式的音频数据
-                // console.log('🎵 开始播放其他格式音频...'); // 减少调试日志
                 await this.playDecodedAudio(audioData);
             }
             
@@ -2339,16 +2301,10 @@ const TTSManager = {
      */
     async playPCMAudio(arrayBuffer, sampleRate) {
         try {
-            // console.log('🔧 开始处理PCM音频数据:', {
-            //     原始数据大小: arrayBuffer.byteLength + ' 字节',
-            //     采样率: sampleRate + ' Hz'
-            // }); // 减少调试日志
             
             const audioBuffer = await this.createPCMAudioBuffer(arrayBuffer, sampleRate);
             if (audioBuffer) {
-                // console.log('🎼 音频缓冲区创建完成，开始播放...'); // 减少调试日志
                 await this.playAudioBuffer(audioBuffer);
-                // console.log('🎵 PCM音频播放完成'); // 减少调试日志
             }
             
         } catch (error) {
@@ -2365,12 +2321,10 @@ const TTSManager = {
         }
         
         this.isProcessingQueue = true;
-        // console.log('🎵 开始处理音频队列，当前队列长度:', this.audioBufferQueue.length); // 减少调试日志
         
         while (this.audioBufferQueue.length > 0 && !this.isInterrupted) {
             const audioBuffer = this.audioBufferQueue.shift();
-            // console.log('▶️ 播放队列中的音频片段，时长:', audioBuffer.duration.toFixed(3), '秒，剩余队列:', this.audioBufferQueue.length); // 减少调试日志
-            
+
             // 更新播放统计
             this.updatePlaybackStats(audioBuffer);
             
@@ -2383,7 +2337,6 @@ const TTSManager = {
         }
         
         this.isProcessingQueue = false;
-        // console.log('✅ 音频队列处理完成'); // 减少调试日志
     },
     
     /**
@@ -2404,7 +2357,6 @@ const TTSManager = {
     async playAudioBuffer(audioBuffer) {
         return new Promise((resolve) => {
             if (this.isInterrupted) {
-                // console.log('⚠️ 音频播放被中断，跳过播放'); // 减少调试日志
                 resolve();
                 return;
             }
@@ -2429,11 +2381,6 @@ const TTSManager = {
      */
     _startAudioPlayback(audioBuffer, resolve) {
         try {
-            // console.log('🔊 开始播放音频缓冲区:', {
-            //     时长: audioBuffer.duration.toFixed(2) + ' 秒',
-            //     采样率: audioBuffer.sampleRate + ' Hz',
-            //     声道数: audioBuffer.numberOfChannels
-            // }); // 减少调试日志
             
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
@@ -2444,7 +2391,6 @@ const TTSManager = {
             this.isPlaying = true;
             
             source.onended = () => {
-                // console.log('🎵 音频播放结束'); // 减少调试日志
                 
                 // 从当前播放列表中移除
                 const index = this.currentSources.indexOf(source);
@@ -2455,14 +2401,12 @@ const TTSManager = {
                 // 如果没有正在播放的音频，更新状态
                 if (this.currentSources.length === 0) {
                     this.isPlaying = false;
-                    // console.log('🔇 所有音频播放完成'); // 减少调试日志
                 }
                 
                 resolve();
             };
             
             // 开始播放
-            // console.log('▶️ 启动音频播放...'); // 减少调试日志
             source.start();
             
         } catch (error) {
@@ -2518,8 +2462,6 @@ const TTSManager = {
             // 暂停音频上下文
             this.audioContext.suspend();
         }
-        
-        // console.log('🔇 已停止所有TTS播放，清空音频队列'); // 减少调试日志
     },
     
     /**
@@ -2535,8 +2477,6 @@ const TTSManager = {
         if (this.audioContext && this.audioContext.state === 'suspended') {
             this.audioContext.resume();
         }
-        
-        // console.log('🎵 开始新的TTS播放，重置音频队列'); // 减少调试日志
     },
     
     /**
@@ -2544,7 +2484,6 @@ const TTSManager = {
      */
     toggleTTS() {
         appState.ttsEnabled = !appState.ttsEnabled;
-        // console.log(`🔊 TTS ${appState.ttsEnabled ? '已启用' : '已禁用'}`); // 减少调试日志
         
         if (!appState.ttsEnabled) {
             this.stopAll();
