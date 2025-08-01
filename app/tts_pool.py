@@ -266,9 +266,13 @@ class TTSConnectionPool:
         try:
             # 检查连接是否已断开
             if hasattr(conn.tts_client, '_ws') and conn.tts_client._ws:
-                if conn.tts_client._ws.closed:
-                    logger.debug(f"🔌 TTS连接已关闭")
-                    return False
+                try:
+                    if hasattr(conn.tts_client._ws, 'closed') and conn.tts_client._ws.closed:
+                        logger.debug(f"🔌 TTS连接已关闭")
+                        return False
+                except (AttributeError, Exception):
+                    # 如果无法访问closed属性，假设连接有效
+                    pass
             
             # 检查连接时间是否过长
             if time.time() - conn.created_at > 3600:  # 1小时

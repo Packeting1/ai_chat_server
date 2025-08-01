@@ -89,14 +89,22 @@ class FunASRClient:
     async def _ping_loop(self):
         """定期发送ping以保持连接活跃"""
         try:
-            while self.websocket and not self.websocket.closed:
+            while self.websocket:
                 await asyncio.sleep(self.ping_interval)
                 
-                if self.websocket and not self.websocket.closed:
+                if self.websocket:
                     try:
+                        # 检查连接状态
+                        if hasattr(self.websocket, 'closed') and self.websocket.closed:
+                            logger.debug("FunASR连接已关闭，停止ping")
+                            break
+                        
                         await self.websocket.ping()
                         self.last_ping_time = asyncio.get_event_loop().time()
                         logger.debug("发送FunASR连接ping")
+                    except websockets.exceptions.ConnectionClosed:
+                        logger.debug("FunASR连接已关闭，停止ping")
+                        break
                     except Exception as e:
                         logger.warning(f"FunASR ping失败: {e}")
                         break
@@ -349,6 +357,6 @@ class FunASRClient:
             else:
                 # 如果没有closed属性，假设连接有效
                 return True
-        except AttributeError:
-            # 某些websockets版本没有closed属性，假设连接有效
+        except (AttributeError, Exception):
+            # 某些websockets版本没有closed属性或访问失败，假设连接有效
             return True 
