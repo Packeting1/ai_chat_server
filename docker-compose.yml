@@ -1,0 +1,90 @@
+services:
+  funasr:
+    image: packeting/funasr:latest
+    container_name: chat_funasr
+    restart: unless-stopped
+    privileged: true
+    command: >
+      /bin/bash -c "
+      echo '🔧 安装系统依赖...' &&
+      apt-get update &&
+      apt-get install -y ffmpeg git-lfs &&
+      echo '✅ 系统依赖安装完成' &&
+      echo '🔄 初始化模型目录...' &&
+      mkdir -p /workspace/models &&
+      cd /workspace/models &&
+      git lfs install &&
+      echo '✅ Git LFS 初始化完成' &&
+      echo '📥 下载语音识别模型...' &&
+      if [ ! -d 'speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online' ]; then
+        git clone https://huggingface.co/packetingz/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online;
+        echo '✅ 模型下载完成';
+      else
+        echo '⚡ 模型已存在，跳过下载';
+      fi &&
+      echo '🔄 检查和转换模型格式...' &&
+      cd /workspace/models &&
+      if [ ! -f 'speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online/model_quant.onnx' ] || [ ! -f 'speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online/decoder_quant.onnx' ]; then
+        echo '🔧 转换PT模型为ONNX模型...' &&
+        funasr-export ++model=speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online ++Quantize=false &&
+        echo '✅ 模型转换完成' &&
+        echo '📝 重命名ONNX文件...' &&
+        cd speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online &&
+        if [ -f 'decoder.onnx' ]; then mv decoder.onnx decoder_quant.onnx; fi &&
+        if [ -f 'model.onnx' ]; then mv model.onnx model_quant.onnx; fi &&
+        echo '✅ 模型文件重命名完成';
+      else
+        echo '⚡ ONNX模型已存在，跳过转换';
+      fi &&
+      echo '📋 模型目录文件列表:' &&
+      ls -la /workspace/models/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online/ &&
+      echo '✅ 模型准备完成' &&
+      echo '🚀 启动FunASR服务器...' &&
+      cd /workspace/FunASR/runtime &&
+      bash run_server_2pass.sh &&
+      tail -f /dev/null
+      "
+    volumes:
+      - model_data:/workspace/models
+    networks:
+      - funasr_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: chat_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - funasr_network
+
+  web:
+    build: .
+    container_name: chat_web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "32796:8443"
+    volumes:
+      - ./:/app
+      - db_data:/app/data
+    depends_on:
+      - redis
+      - funasr
+    environment:
+      - DJANGO_SETTINGS_MODULE=ai_chat_server.settings
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FUNASR_HOST=funasr
+      - DATABASE_PATH=/app/data/db.sqlite3
+    networks:
+      - funasr_network
+
+volumes:
+  redis_data:
+  db_data:
+  model_data:
+
+networks:
+  funasr_network:
+    driver: bridge 

@@ -1,0 +1,8 @@
+__pycache__/
+db.sqlite3
+.vs
+.DS_Store
+.idea/
+.vscode/
+.venv/
+.ruff_cache/
