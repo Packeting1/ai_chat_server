@@ -1,4 +1,5 @@
 import sys
+import os
 
 import django
 from django.core.management import execute_from_command_line
@@ -49,10 +50,9 @@ def create_default_config():
 
 def main():
     """主函数"""
-
-    setup_django()
-
+    
     try:
+        setup_django()
         run_migrations()
         create_superuser()
         create_default_config()

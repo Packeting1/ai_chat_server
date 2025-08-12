@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+echo "📁 确保必要的目录存在..."
+mkdir -p /workspace/data
+mkdir -p /workspace/staticfiles
+chmod -R 755 /workspace/data
+
 echo "🧹 清理静态文件目录..."
 rm -rf staticfiles/*
 

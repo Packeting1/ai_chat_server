@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 RUN mkdir -p staticfiles && \
     mkdir -p /workspace/data && \
+    mkdir -p /workspace/data/files && \
     chmod -R 755 /workspace
 
 EXPOSE 8000
