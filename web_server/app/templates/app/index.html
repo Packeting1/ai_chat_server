@@ -1,0 +1,316 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{{ config.page_title_en }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background-color: #f0f2f5;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .controls-panel {
+            width: 420px;
+            min-width: 420px;
+            padding: 25px;
+            background: white;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.08);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e0e0e0;
+        }
+        .results-panel {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .results-container {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column-reverse;
+            padding: 0 10px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin: -5px 0 25px 0;
+            font-size: 14px;
+        }
+        .mode-selector {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 25px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #ccc;
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background: #f8f8f8;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: background 0.3s, color 0.3s;
+        }
+        .mode-btn:not(:last-child) {
+            border-right: 1px solid #ccc;
+        }
+        .mode-btn.active {
+            background: #007bff;
+            color: white;
+        }
+        .control-section {
+            margin-bottom: 20px;
+        }
+        .btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        .btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .upload-area {
+            border: 2px dashed #007bff;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin-top: 10px;
+            background-color: #f8f9fa;
+            transition: background-color 0.2s;
+        }
+        .upload-area.dragover {
+            background-color: #e2e6ea;
+            border-color: #0056b3;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 75%;
+            line-height: 1.5;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: #a0e959;
+            color: #000;
+            align-self: flex-end;
+            border-bottom-right-radius: 5px;
+        }
+        .ai-message {
+            background-color: #ffffff;
+            color: #333;
+            align-self: flex-start;
+            border: 1px solid #e5e5e5;
+            border-bottom-left-radius: 5px;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        /* 时间戳样式 - 显示在对话框下方 */
+        .message-timestamp {
+            position: absolute;
+            bottom: -18px;
+            right: 0;
+            font-size: 9px;
+            color: #999;
+            background: none;
+        }
+
+        /* 用户消息的时间戳 */
+        .user-message {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .user-message .message-timestamp {
+            bottom: -18px;
+            right: 0;
+        }
+        #streamBtn.active {
+            background-color: #dc3545;
+        }
+        #streamBtn.active:hover {
+            background-color: #c82333;
+        }
+        #status-bar {
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+            margin-top: auto; /* Push to bottom */
+            position: relative;
+        }
+        .language-toggle {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 20px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #495057;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .language-toggle:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+        .language-toggle .globe-icon {
+            font-size: 14px;
+        }
+        .status-box {
+            text-align: center;
+            margin: 10px 0;
+        }
+        /* jQuery增强样式 */
+        #status.error {
+            color: #dc3545 !important;
+            font-weight: bold;
+            animation: shake 0.5s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="controls-panel">
+        <img src="{{ config.logo_image }}" style="width: 154px; height: 35px; margin: 0 auto; display: block;">
+        <h1>{{ config.main_title_en }}</h1>
+        <p class="subtitle">Beta 1.0</p>
+
+        <div class="mode-selector">
+            <button id="realtimeModeBtn" class="mode-btn active" onclick="switchMode('realtime')">🎙️ Real-time Chat</button>
+            <button id="offlineModeBtn" class="mode-btn" onclick="switchMode('offline')">📁 File Recognition</button>
+        </div>
+
+        <div id="realtimeControls" class="control-section">
+            <div style="text-align: center;">
+                <button id="streamBtn" class="btn" onclick="toggleStreamMode()">Start Chat</button>
+                <button id="resetBtn" class="btn" onclick="resetConversation()" style="background-color: #6c757d;">Reset Chat</button>
+                <button id="testBtn" class="btn" onclick="testLLM()" style="background-color: #ffc107;">Test LLM</button>
+                <button id="configBtn" class="btn" onclick="ConfigManager.toggleAudioConfig()" style="background-color: #17a2b8;">Audio Settings</button>
+                <button id="ttsBtn" class="btn" onclick="toggleTTS()" style="background-color: #28a745;">🔊 TTS On</button>
+
+            </div>
+
+            <div id="audioConfigPanel" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0; border: 1px solid #dee2e6;">
+                <h4 style="margin-top: 0; color: #495057;">🔧 Audio Configuration</h4>
+                <div style="text-align: left; margin: 10px 0;">
+                    <label style="display: block; margin: 5px 0;">
+                        📊 Sample Rate:
+                        <select id="sampleRateSelect" onchange="ConfigManager.updateAudioConfig()" style="margin-left: 10px; padding: 5px;">
+                            <option value="8000">8kHz (Phone Quality)</option>
+                            <option value="16000" selected>16kHz (Standard Quality)</option>
+                            <option value="22050">22kHz (High Quality)</option>
+                        </select>
+                    </label>
+                    <label style="display: block; margin: 5px 0;">
+                        ⏱️ Send Interval:
+                        <select id="sendIntervalSelect" onchange="ConfigManager.updateAudioConfig()" style="margin-left: 10px; padding: 5px;">
+                            <option value="50">50ms (Good Real-time)</option>
+                            <option value="100" selected>100ms (Balanced)</option>
+                            <option value="200">200ms (Bandwidth Saving)</option>
+                        </select>
+                    </label>
+                </div>
+                <div style="font-size: 12px; color: #666; margin-top: 10px;">
+                    <div id="bandwidthInfo">📈 Estimated Bandwidth: 32KB/sec</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="offlineControls" class="control-section" style="display: none;">
+            <div class="upload-area" id="uploadArea"
+                 ondrop="handleFileDrop(event)"
+                 ondragover="handleDragOver(event)"
+                 ondragenter="handleDragEnter(event)"
+                 ondragleave="handleDragLeave(event)">
+                <h4 style="margin-top: 0; color: #495057;">Upload Audio File</h4>
+                <p style="color: #666; font-size: 14px; margin: 10px 0;">📥 Drag files here or click to select</p>
+                <input type="file" id="audioFile" accept=".wav,.mp3,.m4a,.webm,.ogg" style="display: none;" onchange="handleFileSelect(event)">
+                <button class="btn" style="background-color: #6c757d;" onclick="document.getElementById('audioFile').click();">Select File</button>
+                <div id="fileInfoContainer" style="margin-top: 15px;"></div>
+                <div id="offlineButtons" style="display:none;">
+                    <button class="btn" onclick="uploadAudio()" style="background-color: #28a745;">🚀 Batch Recognition</button>
+                    <button class="btn" onclick="streamUploadAudio()" style="background-color: #007bff;">⚡ Stream Recognition</button>
+                </div>
+                <div style="font-size: 12px; color: #666; margin-top: 15px;">
+                    Supports WAV, MP3, M4A formats, 10MB limit
+                </div>
+            </div>
+        </div>
+
+        <div id="status-bar">
+            <div class="language-toggle" onclick="toggleLanguage()" title="Switch Language">
+                <span class="globe-icon">🌐</span>
+                <span id="currentLang">EN</span>
+            </div>
+            <div class="status-box">
+                <div id="status" style="font-weight: bold; color: #666;">Disconnected</div>
+                <div id="currentText" style="font-style: italic; color: #999; min-height: 20px; margin: 10px 0;">Waiting for operation...</div>
+            </div>
+            <div class="status-box">
+                <div id="memoryStatus" style="font-size: 12px; color: #888; margin: 5px 0;">🧠 AI Memory: Empty</div>
+                <div id="userInfo" style="font-size: 11px; color: #aaa; margin: 5px 0;">👤 User: Disconnected | 🌐 Online: 0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="results-panel" id="resultsPanel">
+        <div class="results-container" id="results">
+            <!-- Chat/Recognition results will be displayed here -->
+        </div>
+    </div>
+
+    <!-- 配置数据 -->
+    <script>
+        // 从Django后端传递配置数据到前端
+        window.APP_CONFIG = {
+            pageTitleZh: "{{ config.page_title_zh }}",
+            pageTitleEn: "{{ config.page_title_en }}",
+            mainTitleZh: "{{ config.main_title_zh }}",
+            mainTitleEn: "{{ config.main_title_en }}",
+            logoImage: "{{ config.logo_image }}"
+        };
+    </script>
+
+    <!-- 加载jQuery库 -->
+    <script src="{% static 'app/jquery.min.js' %}"></script>
+    <!-- 加载应用主脚本 -->
+    <script src="{% static 'app/app.js' %}"></script>
+</body>
+</html>

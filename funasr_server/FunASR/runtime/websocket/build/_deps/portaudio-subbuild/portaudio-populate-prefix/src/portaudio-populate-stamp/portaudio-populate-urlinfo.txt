@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/opt/cmake-3.26.3-linux-x86_64/bin/cmake;-P;/workspace/FunASR/runtime/websocket/build/_deps/portaudio-subbuild/portaudio-populate-prefix/src/portaudio-populate-stamp/download-portaudio-populate.cmake;COMMAND;/opt/cmake-3.26.3-linux-x86_64/bin/cmake;-P;/workspace/FunASR/runtime/websocket/build/_deps/portaudio-subbuild/portaudio-populate-prefix/src/portaudio-populate-stamp/verify-portaudio-populate.cmake;COMMAND;/opt/cmake-3.26.3-linux-x86_64/bin/cmake;-P;/workspace/FunASR/runtime/websocket/build/_deps/portaudio-subbuild/portaudio-populate-prefix/src/portaudio-populate-stamp/extract-portaudio-populate.cmake
+source_dir=/workspace/FunASR/runtime/websocket/build/_deps/portaudio-src
+work_dir=/workspace/FunASR/runtime/websocket/build/_deps
+url(s)=http://files.portaudio.com/archives/pa_stable_v190700_20210406.tgz;https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/dep_libs/pa_stable_v190700_20210406.tgz
+hash=SHA256=47efbf42c77c19a05d22e627d42873e991ec0c1357219c0d74ce6a2948cb2def
+no_extract=
+
