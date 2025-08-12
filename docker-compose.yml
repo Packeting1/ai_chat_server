@@ -1,5 +1,5 @@
 services:
-  funasr:
+  funasr_server:
     build:
       context: ./funasr_server
       dockerfile: Dockerfile
@@ -47,14 +47,14 @@ services:
     networks:
       - funasr_network
 
-  redis:
+  redis_server:
     image: redis:7-alpine
     container_name: chat_redis
     restart: unless-stopped
     networks:
       - funasr_network
 
-  web:
+  web_server:
     build:
       context: ./web_server
       dockerfile: Dockerfile
