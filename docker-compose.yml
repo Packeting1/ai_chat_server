@@ -49,7 +49,7 @@ services:
 
   redis_server:
     image: redis:7-alpine
-    container_name: chat_redis
+    container_name: redis_server
     restart: unless-stopped
     networks:
       - funasr_network
