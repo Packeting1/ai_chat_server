@@ -4,21 +4,21 @@ WORKDIR /workspace
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --fix-missing \
+# 添加 bullseye 源并安装所有依赖包
+RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --fix-missing --no-install-recommends \
     bash \
     procps \
     coreutils \
     libopenblas0 \
     libssl3 \
+    libssl1.1 \
     ca-certificates \
     build-essential \
     wget \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list \
-    && apt-get update \
-    && apt-get install -y --fix-missing libssl1.1 \
+    git \
+    git-lfs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
