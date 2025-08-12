@@ -39,6 +39,7 @@ services:
       echo '✅ 模型准备完成' &&
       echo '🚀 启动FunASR服务器...' &&
       cd /workspace &&
+      chmod +x run_server_2pass.sh &&
       bash run_server_2pass.sh &&
       tail -f /dev/null
       "

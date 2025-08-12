@@ -13,10 +13,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --upgrade pip
 RUN pip install modelscope funasr torch torchaudio
 
-RUN chmod +x /workspace/run_server_2pass.sh /workspace/parse_options.sh
-
 EXPOSE 10095
-
-CMD ["bash", "-c", "bash run_server_2pass.sh && tail -f /dev/null"]
