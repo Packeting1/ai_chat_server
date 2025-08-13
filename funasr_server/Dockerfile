@@ -4,8 +4,8 @@ WORKDIR /workspace
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list && \
-    apt-get update && \
+RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list \
+    && apt-get update \
     && apt-get install -y --fix-missing --no-install-recommends \
     ca-certificates \
     git \
