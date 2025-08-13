@@ -31,24 +31,22 @@ def main():
         ssl_cert_path = ""
         ssl_key_path = ""
 
-    print("🚀 启动Django ASGI服务器（支持WebSocket）")
     print("=" * 50)
 
     # 显示可用的协议和端口
     if ssl_enabled:
-        print(f"🌐 HTTP界面: http://localhost:{http_port}")
-        print(f"🔒 HTTPS界面: https://localhost:{https_port}")
-        print(f"🔌 HTTP WebSocket: ws://localhost:{http_port}/ws/")
-        print(f"🔌 HTTPS WebSocket: wss://localhost:{https_port}/ws/")
-        print(f"🔧 HTTP管理后台: http://localhost:{http_port}/admin/")
-        print(f"🔧 HTTPS管理后台: https://localhost:{https_port}/admin/")
+        print(f"🌐 Web界面: http://{host}:{http_port}")
+        print(f"🔌 WebSocket: ws://{host}:{http_port}/ws/")
+        print(f"🔧 管理后台: http://{host}:{http_port}/admin/")
         print("🔧 默认管理后台账号: admin admin")
         print(f"📡 监听地址: {host} - HTTP:{http_port}, HTTPS:{https_port}")
-        print("🔐 协议模式: 🔒 HTTP + HTTPS 双端口")
+        print("🔐 协议模式: 🔒 HTTP + HTTPS")
     else:
-        print(f"🌐 Web界面: http://localhost:{http_port}")
-        print(f"🔌 WebSocket: ws://localhost:{http_port}/ws/")
-        print(f"🔧 管理后台: http://localhost:{http_port}/admin/")
+
+        print(f"🌐 Web界面: http://{host}:{http_port}")
+        print(f"🔌 WebSocket: ws://{host}:{http_port}/ws/")
+        print(f"🔧 管理后台: http://{host}:{http_port}/admin/")
+        print("🔧 默认管理后台账号: admin admin")
         print(f"📡 监听地址: {host}:{http_port}")
         print("🔐 协议模式: 🔓 仅HTTP")
 

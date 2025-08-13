@@ -10,6 +10,7 @@ RUN apt-get update \
     git \
     git-lfs \
     procps \
+    libssl1.1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
