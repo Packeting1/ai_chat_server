@@ -14,7 +14,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
-    pip install modelscope funasr torch torchaudio && \
-    chmod -R 755 /workspace
+    pip install modelscope funasr torch torchaudio
 
 EXPOSE 10095

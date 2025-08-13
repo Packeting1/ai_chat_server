@@ -37,8 +37,9 @@ services:
       echo '📋 模型目录文件列表:' &&
       ls -la /workspace/models/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online/ &&
       echo '✅ 模型准备完成' &&
-      chmod +x run_server_2pass.sh parse_options.sh &&
       cd /workspace &&
+      chmod +x run_server_2pass.sh parse_options.sh &&
+      chmod -R +x /workspace/FunASR/runtime/websocket/build/bin &&
       echo '🚀 启动FunASR服务器...' &&
       bash run_server_2pass.sh &&
       tail -f /dev/null
