@@ -12,6 +12,7 @@ RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.li
     git-lfs \
     procps \
     libssl1.1 \
+    ffmpeg \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
