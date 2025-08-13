@@ -1,13 +1,15 @@
 services:
   funasr_server:
-    build:
-      context: ./funasr_server
-      dockerfile: Dockerfile
+    image: packeting/funasr:latest
     container_name: funasr_server
     restart: unless-stopped
     privileged: true
     command: >
       /bin/bash -c "
+      echo '🔧 安装系统依赖...' &&
+      apt-get update &&
+      apt-get install -y ffmpeg git-lfs &&
+      echo '✅ 系统依赖安装完成' &&
       echo '🔄 初始化模型目录...' &&
       mkdir -p /workspace/models &&
       cd /workspace/models &&
@@ -37,15 +39,13 @@ services:
       echo '📋 模型目录文件列表:' &&
       ls -la /workspace/models/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online/ &&
       echo '✅ 模型准备完成' &&
-      cd /workspace &&
-      chmod +x run_server_2pass.sh parse_options.sh &&
-      chmod -R +x /workspace/FunASR/runtime/websocket/build/bin &&
       echo '🚀 启动FunASR服务器...' &&
+      cd /workspace/FunASR/runtime &&
       bash run_server_2pass.sh &&
       tail -f /dev/null
       "
     volumes:
-      - ./funasr_server:/workspace
+      - ./model_data:/workspace/models
     networks:
       - funasr_network
 
