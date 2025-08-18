@@ -122,11 +122,10 @@ class SystemConfigAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "tts_use_connection_pool",
-                    "tts_max_concurrent",
                     "tts_connection_max_error_count",
                     "tts_connection_max_idle_time",
                 ),
-                "description": "TTS连接池可以提高并发性能，适合多用户场景。连接池大小由DashScope SDK配置控制。",
+                "description": "TTS连接池可以提高并发性能，适合多用户场景。连接池大小和并发数由DashScope SDK配置控制。",
             },
         ),
         (

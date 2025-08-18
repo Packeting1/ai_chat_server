@@ -144,12 +144,9 @@ class SystemConfig(models.Model):
         max_length=50, default="loongkyong_v2", verbose_name="TTS韩语音色"
     )
 
-    # TTS连接池配置
+    # TTS连接池配置（简化版）
     tts_use_connection_pool = models.BooleanField(
         default=True, verbose_name="启用TTS连接池模式"
-    )
-    tts_max_concurrent = models.IntegerField(
-        default=3, verbose_name="TTS最大并发任务数"
     )
     tts_connection_max_error_count = models.IntegerField(
         default=3, verbose_name="TTS连接最大错误次数"
