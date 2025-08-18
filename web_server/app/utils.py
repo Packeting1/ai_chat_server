@@ -28,11 +28,17 @@ def extract_language_from_text(text: str) -> str | None:
     if not text:
         return None
 
+    # 添加调试日志，查看原始文本
+    logger.error(f"🔍 语言检测 - 原始文本: '{text}'")
+
     # 匹配语言标记，如 <|zh|>, <|yue|>, <|en|> 等
     language_match = re.search(r"<\|([^|]+)\|>", text)
     if language_match:
-        return language_match.group(1)
+        detected_lang = language_match.group(1)
+        logger.error(f"✅ 语言检测成功: '{detected_lang}' (从文本: '{text[:50]}...')")
+        return detected_lang
     
+    logger.error(f"❌ 未检测到语言标记 (文本: '{text[:50]}...')")
     return None
 
 
@@ -57,7 +63,15 @@ def get_tts_voice_by_language(language: str, config) -> str:
     }
     
     # 返回对应语言的音色，如果没有找到则返回默认音色
-    return language_voice_map.get(language, config.tts_default_voice)
+    selected_voice = language_voice_map.get(language, config.tts_default_voice)
+    
+    # 添加调试日志
+    if language in language_voice_map:
+        logger.error(f"🎵 语言'{language}' -> 音色'{selected_voice}'")
+    else:
+        logger.error(f"🎵 未知语言'{language}' -> 默认音色'{selected_voice}'")
+    
+    return selected_voice
 
 
 def clean_recognition_text(text: str) -> str:
