@@ -127,17 +127,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
                 "description": "TTS连接池可以提高并发性能，适合多用户场景。连接池大小和并发数由DashScope SDK配置控制。",
             },
         ),
-        (
-            "DashScope SDK连接池配置",
-            {
-                "fields": (
-                    "dashscope_connection_pool_size",
-                    "dashscope_max_async_requests",
-                    "dashscope_max_async_requests_per_host",
-                ),
-                "description": "DashScope SDK内部连接池配置，推荐三个值保持一致。适用于高并发场景优化。",
-            },
-        ),
+
         (
             "会话配置",
             {

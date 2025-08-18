@@ -268,21 +268,15 @@ async def initialize_tts_pool_with_manager():
     # 从数据库读取配置
     config = await SystemConfig.objects.aget(pk=1)
 
-    # 设置DashScope SDK环境变量
-    os.environ['DASHSCOPE_CONNECTION_POOL_SIZE'] = str(config.dashscope_connection_pool_size)
-    os.environ['DASHSCOPE_MAXIMUM_ASYNC_REQUESTS'] = str(config.dashscope_max_async_requests)
-    os.environ['DASHSCOPE_MAXIMUM_ASYNC_REQUESTS_PER_HOST'] = str(config.dashscope_max_async_requests_per_host)
-    
-    logger.info(f"🔧 DashScope SDK配置 - 连接池大小: {config.dashscope_connection_pool_size}, "
-                f"最大异步请求: {config.dashscope_max_async_requests}, "
-                f"单Host最大请求: {config.dashscope_max_async_requests_per_host}")
+    # Python dashscope_realtime库不需要额外的连接池配置
+    # 每个TTS客户端都是独立的WebSocket连接
 
     if not config.tts_enabled:
         logger.info("🔇 TTS功能未启用")
         return tts_pool
 
     # 简化初始化：主要依赖DashScope SDK的内部连接池
-    logger.info("✅ TTS初始化完成（使用DashScope SDK内部连接池）")
+    logger.info("✅ TTS初始化完成")
     return tts_pool
 
 

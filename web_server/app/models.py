@@ -155,22 +155,7 @@ class SystemConfig(models.Model):
         default=300.0, verbose_name="TTS连接最大空闲时间（秒）"
     )
 
-    # DashScope SDK连接池配置
-    dashscope_connection_pool_size = models.IntegerField(
-        default=32,
-        verbose_name="DashScope连接池大小",
-        help_text="DASHSCOPE_CONNECTION_POOL_SIZE环境变量值，建议与最大异步请求数一致"
-    )
-    dashscope_max_async_requests = models.IntegerField(
-        default=32,
-        verbose_name="DashScope最大异步请求数",
-        help_text="DASHSCOPE_MAXIMUM_ASYNC_REQUESTS环境变量值，推荐与连接池大小一致"
-    )
-    dashscope_max_async_requests_per_host = models.IntegerField(
-        default=32,
-        verbose_name="DashScope单Host最大异步请求数",
-        help_text="DASHSCOPE_MAXIMUM_ASYNC_REQUESTS_PER_HOST环境变量值，推荐与连接池大小一致"
-    )
+
 
     # 页面标题配置
     page_title_zh = models.CharField(
