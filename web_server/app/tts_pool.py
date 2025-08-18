@@ -145,7 +145,7 @@ class TTSConnectionPool:
         # 连接池状态
         self._idle_connections: Queue[TTSConnection] = Queue()
         self._busy_connections: dict[str, TTSConnection] = {}
-        self._all_connections: set[str] = set()
+        self._all_connections: dict[str, TTSConnection] = {}
         self._user_playing_status: dict[str, TTSConnection] = {}
 
         # 锁和同步原语
@@ -262,16 +262,32 @@ class TTSConnectionPool:
     async def _borrow_connection_by_voice(self, voice: str) -> TTSConnection | None:
         """根据音色借用空闲连接"""
         with self._pool_lock:
-            for conn in list(self._idle_connections):
-                if (
-                    not conn.is_busy
-                    and conn.config.voice == voice
-                    and conn.is_healthy()
-                ):
-                    self._idle_connections.remove(conn)
-                    logger.debug(f"🎵 找到匹配音色的空闲连接: {voice}")
-                    return conn
-        return None
+            # 从队列中查找匹配音色的连接
+            temp_connections = []
+            found_connection = None
+            
+            # 取出所有连接进行检查
+            while not self._idle_connections.empty():
+                try:
+                    conn = self._idle_connections.get_nowait()
+                    if (
+                        not conn.is_busy
+                        and conn.config.voice == voice
+                        and conn.is_healthy()
+                        and found_connection is None
+                    ):
+                        found_connection = conn
+                        logger.debug(f"🎵 找到匹配音色的空闲连接: {voice}")
+                    else:
+                        temp_connections.append(conn)
+                except Empty:
+                    break
+            
+            # 将未使用的连接放回队列
+            for conn in temp_connections:
+                self._idle_connections.put_nowait(conn)
+            
+            return found_connection
 
     async def _create_connection_with_voice(
         self, user_id: str, voice: str
@@ -415,7 +431,7 @@ class TTSConnectionPool:
             try:
                 connection = await self.factory.create_connection()
                 with self._pool_lock:
-                    self._all_connections.add(connection.connection_id)
+                    self._all_connections[connection.connection_id] = connection
                 return connection
             except Exception as e:
                 logger.error(f"❌ 创建新连接失败: {e}")
@@ -425,7 +441,7 @@ class TTSConnectionPool:
     async def _destroy_connection(self, connection: TTSConnection):
         """销毁连接"""
         with self._pool_lock:
-            self._all_connections.discard(connection.connection_id)
+            self._all_connections.pop(connection.connection_id, None)
             if connection.connection_id in self._busy_connections:
                 del self._busy_connections[connection.connection_id]
 
@@ -449,7 +465,7 @@ class TTSConnectionPool:
             try:
                 connection = await self.factory.create_connection()
                 with self._pool_lock:
-                    self._all_connections.add(connection.connection_id)
+                    self._all_connections[connection.connection_id] = connection
                 self._idle_connections.put_nowait(connection)
                 logger.debug(f"➕ 预创建连接: {connection.connection_id}")
             except Exception as e:
