@@ -842,10 +842,11 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     async def initialize_tts_pool(self):
         """初始化TTS连接池"""
         try:
-            tts_pool = await get_tts_pool()
-            if not hasattr(tts_pool, "_initialized"):
-                await tts_pool.initialize()
-                tts_pool._initialized = True
+            from .tts_pool import initialize_tts_pool_with_manager
+            
+            # 使用完整的初始化函数，包含任务管理器
+            await initialize_tts_pool_with_manager()
+            logger.info("🎵 TTS连接池和任务管理器初始化完成")
         except Exception as e:
             logger.error(f"初始化TTS连接池失败: {e}")
 

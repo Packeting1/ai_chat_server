@@ -1069,18 +1069,27 @@ async def initialize_tts_pool_with_manager():
 
     # 检查是否启用连接池模式
     if not config.tts_use_connection_pool:
+        logger.info("🔄 TTS连接池模式未启用，将使用一次性连接模式")
+        return tts_pool
+
+    # 避免重复初始化
+    if hasattr(tts_pool, "_task_manager") and tts_pool._task_manager:
+        logger.debug("🎵 TTS连接池和任务管理器已初始化，跳过")
         return tts_pool
 
     # 初始化连接池
     await tts_pool.initialize()
+    logger.info("🎵 TTS连接池初始化完成")
 
     # 创建并启动任务管理器
     max_concurrent = config.tts_max_concurrent
     task_manager = TTSTaskManager(tts_pool, max_concurrent)
     await task_manager.start_workers()
+    logger.info(f"🎵 TTS任务管理器启动完成，最大并发数: {max_concurrent}")
 
     # 将任务管理器附加到连接池
     tts_pool._task_manager = task_manager
+    logger.info("✅ TTS连接池和任务管理器完全初始化")
     return tts_pool
 
 
