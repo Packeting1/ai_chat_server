@@ -37,14 +37,20 @@ class TTSConnection:
 
     def is_healthy(self) -> bool:
         """检查连接是否健康"""
-        return (
-            self.error_count < self.max_error_count 
-            and self.is_connected 
-            and self.tts_client 
-            and hasattr(self.tts_client, '_ws') 
-            and self.tts_client._ws 
-            and not self.tts_client._ws.closed
-        )
+        try:
+            # 基本健康检查
+            if not (self.error_count < self.max_error_count and self.is_connected and self.tts_client):
+                return False
+            
+            # WebSocket健康检查（容错处理）
+            if hasattr(self.tts_client, '_ws') and self.tts_client._ws is not None:
+                return not self.tts_client._ws.closed
+            else:
+                # 如果WebSocket还没有初始化，认为连接是健康的（刚创建的连接）
+                return True
+        except Exception as e:
+            logger.debug(f"🔍 连接健康检查异常 {self.connection_id}: {e}")
+            return False
 
     def mark_used(self):
         """标记连接被使用"""
@@ -280,6 +286,20 @@ class TTSConnectionPool:
         # 无论如何都从池中移除有问题的连接，避免重用
         await self._remove_connection(conn)
 
+    async def interrupt_user_tts(self, user_id: str) -> bool:
+        """中断指定用户的TTS任务（简化版）"""
+        try:
+            # 在简化的连接池中，我们直接通过任务管理器中断用户TTS
+            task_manager = getattr(self, "_task_manager", None)
+            if task_manager:
+                return await task_manager.interrupt_user_tts(user_id)
+            else:
+                logger.warning(f"⚠️ 任务管理器未初始化，无法中断用户 {user_id} 的TTS")
+                return False
+        except Exception as e:
+            logger.error(f"❌ 中断用户 {user_id} TTS失败: {e}")
+            return False
+
     # 内部管理方法
 
 
@@ -468,6 +488,19 @@ class TTSTaskManager:
 
     async def cancel_user_tasks(self, user_id: str) -> int:
         """取消指定用户的所有任务"""
+        return await self._cancel_user_tasks_internal(user_id)
+
+    async def interrupt_user_tts(self, user_id: str) -> bool:
+        """中断指定用户的TTS任务"""
+        try:
+            cancelled_count = await self._cancel_user_tasks_internal(user_id)
+            return cancelled_count > 0
+        except Exception as e:
+            logger.error(f"❌ 中断用户 {user_id} TTS任务失败: {e}")
+            return False
+
+    async def _cancel_user_tasks_internal(self, user_id: str) -> int:
+        """内部方法：取消指定用户的所有任务"""
         cancelled_count = 0
 
         # 取消队列中的任务
@@ -494,9 +527,7 @@ class TTSTaskManager:
                 running_task.cancel()
                 cancelled_count += 1
 
-        # 中断用户的TTS播放
-        await self.pool.interrupt_user_tts(user_id)
-
+        logger.info(f"🛑 取消用户 {user_id} 的 {cancelled_count} 个TTS任务")
         return cancelled_count
 
     async def get_task_status(self, task_id: str) -> dict | None:
