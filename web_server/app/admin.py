@@ -123,16 +123,21 @@ class SystemConfigAdmin(admin.ModelAdmin):
                 "fields": (
                     "tts_use_connection_pool",
                     "tts_max_concurrent",
-                    "tts_pool_max_total",
-                    "tts_pool_min_idle",
-                    "tts_pool_max_idle",
                     "tts_connection_max_error_count",
-                    "tts_pool_connection_timeout",
-                    "tts_pool_cleanup_interval",
                     "tts_connection_max_idle_time",
-                    "tts_pool_max_wait_time",
                 ),
-                "description": "TTS连接池可以提高并发性能，适合多用户场景。",
+                "description": "TTS连接池可以提高并发性能，适合多用户场景。连接池大小由DashScope SDK配置控制。",
+            },
+        ),
+        (
+            "DashScope SDK连接池配置",
+            {
+                "fields": (
+                    "dashscope_connection_pool_size",
+                    "dashscope_max_async_requests",
+                    "dashscope_max_async_requests_per_host",
+                ),
+                "description": "DashScope SDK内部连接池配置，推荐三个值保持一致。适用于高并发场景优化。",
             },
         ),
         (

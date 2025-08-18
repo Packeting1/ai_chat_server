@@ -37,7 +37,14 @@ class TTSConnection:
 
     def is_healthy(self) -> bool:
         """检查连接是否健康"""
-        return self.error_count < self.max_error_count and self.is_connected
+        return (
+            self.error_count < self.max_error_count 
+            and self.is_connected 
+            and self.tts_client 
+            and hasattr(self.tts_client, '_ws') 
+            and self.tts_client._ws 
+            and not self.tts_client._ws.closed
+        )
 
     def mark_used(self):
         """标记连接被使用"""
@@ -50,26 +57,17 @@ class TTSConnection:
 
 @dataclass
 class PoolConfig:
-    """连接池配置"""
+    """连接池配置（简化版，主要配置由DashScope SDK控制）"""
 
-    max_total: int
-    max_idle: int
-    min_idle: int
-    max_wait_time: float
-    connection_timeout: float
-    cleanup_interval: float
+    max_concurrent: int
+    cleanup_interval: float = 60.0  # 固定清理间隔
 
     @classmethod
     async def from_system_config(cls):
         """从SystemConfig模型创建配置"""
         config = await SystemConfig.objects.aget(pk=1)
         return cls(
-            max_total=config.tts_pool_max_total,
-            max_idle=config.tts_pool_max_idle,
-            min_idle=config.tts_pool_min_idle,
-            max_wait_time=config.tts_pool_max_wait_time,
-            connection_timeout=config.tts_pool_connection_timeout,
-            cleanup_interval=config.tts_pool_cleanup_interval,
+            max_concurrent=config.tts_max_concurrent,
         )
 
 
@@ -119,7 +117,10 @@ class TTSConnectionFactory:
         try:
             await tts_client.connect()
             connection.is_connected = True
-        except Exception:
+            logger.debug(f"✅ TTS连接建立成功: {connection_id}")
+        except Exception as e:
+            logger.error(f"❌ TTS连接建立失败: {connection_id}, 错误: {e}")
+            connection.is_connected = False
             raise
 
         return connection
@@ -127,11 +128,21 @@ class TTSConnectionFactory:
     async def destroy_connection(self, connection: TTSConnection):
         """销毁TTS连接"""
         try:
-            if connection.tts_client and connection.is_connected:
-                await connection.tts_client.disconnect()
+            if connection.tts_client:
+                # 强制关闭WebSocket连接
+                if hasattr(connection.tts_client, '_ws') and connection.tts_client._ws:
+                    if not connection.tts_client._ws.closed:
+                        await connection.tts_client._ws.close()
+                
+                # 调用正常的断开方法
+                if connection.is_connected:
+                    await connection.tts_client.disconnect()
+                    
             connection.is_connected = False
+            logger.debug(f"🗑️ TTS连接已销毁: {connection.connection_id}")
         except Exception as e:
             logger.warning(f"⚠️ 销毁TTS连接失败: {connection.connection_id}, 错误: {e}")
+            connection.is_connected = False
 
 
 class TTSConnectionPool:
@@ -142,20 +153,16 @@ class TTSConnectionPool:
         self.factory: TTSConnectionFactory | None = None
         self._config_loaded = False
 
-        # 连接池状态
-        self._idle_connections: Queue[TTSConnection] = Queue()
+        # 简化的连接池状态（主要依赖DashScope SDK连接池）
         self._busy_connections: dict[str, TTSConnection] = {}
         self._all_connections: dict[str, TTSConnection] = {}
-        self._user_playing_status: dict[str, TTSConnection] = {}
 
         # 锁和同步原语
         self._pool_lock = Lock()
-        self._cleanup_lock = Lock()
         self._async_lock = asyncio.Lock()
 
         # 后台任务
         self._cleanup_task: asyncio.Task | None = None
-        self._executor: ThreadPoolExecutor | None = None
         self._shutdown = False
 
     async def initialize(self):
@@ -172,134 +179,37 @@ class TTSConnectionPool:
         if self._cleanup_task is None:
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
-        # 预创建最小连接数
-        await self._ensure_min_connections()
-
     async def _load_config_from_db(self):
         """从数据库加载配置"""
         if not self._config_loaded:
             self.config = await PoolConfig.from_system_config()
             self._config_loaded = True
 
-            # 初始化线程池
-            if self._executor is None:
-                self._executor = ThreadPoolExecutor(max_workers=self.config.max_total)
-
-    async def get_connection(
-        self, user_id: str, voice: str = None
-    ) -> TTSConnection | None:
-        """获取可用连接"""
+    async def borrow_connection(self, voice: str = None) -> TTSConnection | None:
+        """借用连接（简化版，直接创建新连接）"""
         if self._shutdown:
             return None
 
         async with self._async_lock:
-            # 如果指定了音色，检查是否需要创建新连接
-            if voice:
-                # 检查用户是否已有活跃连接，且音色匹配
-                if user_id in self._user_playing_status:
-                    existing_conn = self._user_playing_status[user_id]
-                    if (
-                        existing_conn.is_healthy()
-                        and existing_conn.config.voice == voice
-                    ):
-                        logger.debug(f"🎵 复用匹配音色连接: {voice}")
-                        return existing_conn
-                    else:
-                        # 音色不匹配或连接不健康，释放旧连接
-                        logger.info(
-                            f"🔄 音色切换 {existing_conn.config.voice} -> {voice}，释放旧连接"
-                        )
-                        await self._remove_connection(existing_conn)
+            # 直接创建新连接，依赖DashScope SDK的连接池管理
+            return await self._create_connection_with_voice(voice or "default")
 
-                # 尝试找到匹配音色的空闲连接
-                connection = await self._borrow_connection_by_voice(voice)
-                if connection:
-                    connection.is_busy = True
-                    connection.user_id = user_id
-                    connection.mark_used()
+    async def return_connection(self, conn: TTSConnection):
+        """归还连接（简化版，直接销毁）"""
+        if not conn or conn.connection_id not in self._all_connections:
+            return
 
-                    with self._pool_lock:
-                        self._busy_connections[connection.connection_id] = connection
-                        self._user_playing_status[user_id] = connection
+        async with self._async_lock:
+            # 简化逻辑：直接销毁连接，依赖DashScope SDK的连接池复用
+            await self._destroy_connection(conn)
 
-                    logger.debug(
-                        f"📤 分配音色连接给用户 {user_id}: {connection.connection_id} (音色: {voice})"
-                    )
-                    return connection
 
-                # 没有匹配的连接，创建新连接（使用指定音色）
-                return await self._create_connection_with_voice(user_id, voice)
-
-            else:
-                # 没有指定音色，使用原来的逻辑
-                # 检查用户是否已有活跃连接
-                if user_id in self._user_playing_status:
-                    existing_conn = self._user_playing_status[user_id]
-                    if existing_conn.is_healthy():
-                        return existing_conn
-                    else:
-                        # 清理不健康的连接
-                        await self._remove_connection(existing_conn)
-
-                # 尝试从空闲池获取连接
-                connection = await self._borrow_connection()
-                if connection:
-                    connection.is_busy = True
-                    connection.user_id = user_id
-                    connection.mark_used()
-
-                    with self._pool_lock:
-                        self._busy_connections[connection.connection_id] = connection
-                        self._user_playing_status[user_id] = connection
-
-                    logger.debug(
-                        f"📤 分配连接给用户 {user_id}: {connection.connection_id}"
-                    )
-                    return connection
-
-                return None
-
-    async def _borrow_connection_by_voice(self, voice: str) -> TTSConnection | None:
-        """根据音色借用空闲连接"""
-        with self._pool_lock:
-            # 从队列中查找匹配音色的连接
-            temp_connections = []
-            found_connection = None
-            
-            # 取出所有连接进行检查
-            while not self._idle_connections.empty():
-                try:
-                    conn = self._idle_connections.get_nowait()
-                    if (
-                        not conn.is_busy
-                        and conn.config.voice == voice
-                        and conn.is_healthy()
-                        and found_connection is None
-                    ):
-                        found_connection = conn
-                        logger.debug(f"🎵 找到匹配音色的空闲连接: {voice}")
-                    else:
-                        temp_connections.append(conn)
-                except Empty:
-                    break
-            
-            # 将未使用的连接放回队列
-            for conn in temp_connections:
-                self._idle_connections.put_nowait(conn)
-            
-            return found_connection
 
     async def _create_connection_with_voice(
-        self, user_id: str, voice: str
+        self, voice: str
     ) -> TTSConnection | None:
-        """为指定用户和音色创建新连接"""
+        """为指定音色创建新连接（简化版）"""
         try:
-            # 检查是否还能创建新连接
-            with self._pool_lock:
-                if len(self._all_connections) >= self.config.max_total:
-                    logger.warning(f"⚠️ TTS连接池已满，无法为音色 {voice} 创建新连接")
-                    return None
-
             # 获取配置并修改音色
             config_dict = await self.factory.tts_config_getter()
             config_dict = config_dict.copy()
@@ -335,8 +245,7 @@ class TTSConnectionPool:
                 connection_id=connection_id,
                 max_error_count=system_config.tts_connection_max_error_count,
                 max_idle_time=system_config.tts_connection_max_idle_time,
-                is_busy=True,
-                user_id=user_id,
+                is_busy=True,  # 新创建的连接直接标记为忙碌
             )
 
             # 连接到TTS服务
@@ -346,97 +255,34 @@ class TTSConnectionPool:
             with self._pool_lock:
                 self._all_connections[connection_id] = connection
                 self._busy_connections[connection_id] = connection
-                self._user_playing_status[user_id] = connection
 
-            logger.info(
-                f"🎵 为用户 {user_id} 创建新的音色连接: {voice} ({connection_id})"
-            )
+            logger.debug(f"🎵 创建TTS连接: {voice} ({connection_id})")
             return connection
 
         except Exception as e:
-            logger.error(f"❌ 创建音色连接失败 (音色: {voice}): {e}")
+            logger.error(f"❌ 创建TTS连接失败 (音色: {voice}): {e}")
             return None
 
-    async def release_connection(self, conn: TTSConnection, user_id: str):
-        """释放连接"""
-        if not conn or conn.connection_id not in self._all_connections:
-            return
 
-        async with self._async_lock:
-            # 清理用户状态
-            if user_id in self._user_playing_status:
-                del self._user_playing_status[user_id]
-
-            # 重置连接状态
-            conn.is_busy = False
-            conn.user_id = None
-            conn.mark_used()
-
-            with self._pool_lock:
-                if conn.connection_id in self._busy_connections:
-                    del self._busy_connections[conn.connection_id]
-
-                # 检查连接健康状态
-                if conn.is_healthy() and not conn.is_expired():
-                    # 归还到空闲池
-                    if self._idle_connections.qsize() < self.config.max_idle:
-                        self._idle_connections.put_nowait(conn)
-                        logger.debug(f"📥 归还连接到空闲池: {conn.connection_id}")
-                    else:
-                        # 空闲池已满，销毁连接
-                        await self._destroy_connection(conn)
-                else:
-                    # 连接不健康，销毁
-                    await self._destroy_connection(conn)
-
-    async def interrupt_user_tts(self, user_id: str):
-        """中断指定用户的TTS播放"""
-        async with self._async_lock:
-            if user_id in self._user_playing_status:
-                connection = self._user_playing_status[user_id]
-                try:
-                    if connection.tts_client:
-                        await connection.tts_client.interrupt()
-                except Exception as e:
-                    logger.error(f"❌ 中断用户 {user_id} TTS失败: {e}")
-                    connection.mark_error()
 
     async def handle_connection_error(self, conn: TTSConnection, error: Exception):
         """处理连接错误"""
         conn.mark_error()
-        logger.error(f"❌ TTS连接错误 {conn.connection_id}: {error}")
+        conn.is_connected = False  # 标记连接为断开状态
+        error_msg = str(error)
+        
+        # 检查是否是WebSocket协议错误（1007等）
+        if "1007" in error_msg or "invalid frame" in error_msg.lower():
+            logger.warning(f"⚠️ TTS WebSocket协议错误 {conn.connection_id}: {error}")
+        else:
+            logger.error(f"❌ TTS连接错误 {conn.connection_id}: {error}")
 
-        # 如果连接不健康，从池中移除
-        if not conn.is_healthy():
-            await self._remove_connection(conn)
+        # 无论如何都从池中移除有问题的连接，避免重用
+        await self._remove_connection(conn)
 
     # 内部管理方法
 
-    async def _borrow_connection(self) -> TTSConnection | None:
-        """从池中借用连接"""
-        # 尝试从空闲池获取
-        try:
-            connection = self._idle_connections.get_nowait()
-            if connection.is_healthy() and not connection.is_expired():
-                return connection
-            else:
-                # 连接不健康，销毁并重试
-                await self._destroy_connection(connection)
-                return await self._borrow_connection()
-        except Empty:
-            pass
 
-        # 空闲池为空，尝试创建新连接
-        if len(self._all_connections) < self.config.max_total:
-            try:
-                connection = await self.factory.create_connection()
-                with self._pool_lock:
-                    self._all_connections[connection.connection_id] = connection
-                return connection
-            except Exception as e:
-                logger.error(f"❌ 创建新连接失败: {e}")
-
-        return None
 
     async def _destroy_connection(self, connection: TTSConnection):
         """销毁连接"""
@@ -445,8 +291,7 @@ class TTSConnectionPool:
             if connection.connection_id in self._busy_connections:
                 del self._busy_connections[connection.connection_id]
 
-        if connection.user_id and connection.user_id in self._user_playing_status:
-            del self._user_playing_status[connection.user_id]
+
 
         await self.factory.destroy_connection(connection)
 
@@ -454,59 +299,19 @@ class TTSConnectionPool:
         """从池中移除连接"""
         await self._destroy_connection(connection)
 
-    async def _ensure_min_connections(self):
-        """确保最小连接数"""
-        current_idle = self._idle_connections.qsize()
-        needed = max(0, self.config.min_idle - current_idle)
 
-        for _ in range(needed):
-            if len(self._all_connections) >= self.config.max_total:
-                break
-            try:
-                connection = await self.factory.create_connection()
-                with self._pool_lock:
-                    self._all_connections[connection.connection_id] = connection
-                self._idle_connections.put_nowait(connection)
-                logger.debug(f"➕ 预创建连接: {connection.connection_id}")
-            except Exception as e:
-                logger.error(f"❌ 预创建连接失败: {e}")
-                break
 
     async def _cleanup_loop(self):
-        """清理过期连接的后台任务"""
+        """清理过期连接的后台任务（简化版）"""
         while not self._shutdown:
             try:
                 await asyncio.sleep(self.config.cleanup_interval)
-                await self._cleanup_expired_connections()
-                await self._ensure_min_connections()
+                # 简化清理逻辑：主要依赖DashScope SDK的连接管理
+                logger.debug("🧹 定期清理任务执行")
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"❌ 清理任务错误: {e}")
-
-    async def _cleanup_expired_connections(self):
-        """清理过期连接"""
-        expired_connections = []
-
-        # 检查空闲连接
-        temp_queue = Queue()
-        while not self._idle_connections.empty():
-            try:
-                conn = self._idle_connections.get_nowait()
-                if conn.is_expired() or not conn.is_healthy():
-                    expired_connections.append(conn)
-                else:
-                    temp_queue.put_nowait(conn)
-            except Empty:
-                break
-
-        # 将未过期的连接放回
-        self._idle_connections = temp_queue
-
-        # 销毁过期连接
-        for conn in expired_connections:
-            await self._destroy_connection(conn)
-            logger.debug(f"🧹 清理过期连接: {conn.connection_id}")
 
     async def _get_system_config(self):
         """获取系统配置"""
@@ -528,40 +333,13 @@ class TTSConnectionPool:
         }
 
     async def get_stats(self):
-        """获取连接池统计"""
+        """获取连接池统计（简化版）"""
         with self._pool_lock:
-            idle_count = self._idle_connections.qsize()
             busy_count = len(self._busy_connections)
             total_count = len(self._all_connections)
-            active_users = len(self._user_playing_status)
 
-            # 获取连接详情
+            # 获取忙碌连接详情
             connections = []
-
-            # 空闲连接
-            temp_list = []
-            while not self._idle_connections.empty():
-                try:
-                    conn = self._idle_connections.get_nowait()
-                    temp_list.append(conn)
-                    connections.append(
-                        {
-                            "connection_id": conn.connection_id,
-                            "status": "idle",
-                            "created_at": conn.created_at,
-                            "last_used": conn.last_used,
-                            "error_count": conn.error_count,
-                            "user_id": None,
-                        }
-                    )
-                except Empty:
-                    break
-
-            # 放回空闲连接
-            for conn in temp_list:
-                self._idle_connections.put_nowait(conn)
-
-            # 忙碌连接
             for conn in self._busy_connections.values():
                 connections.append(
                     {
@@ -570,19 +348,17 @@ class TTSConnectionPool:
                         "created_at": conn.created_at,
                         "last_used": conn.last_used,
                         "error_count": conn.error_count,
-                        "user_id": conn.user_id,
+                        "voice": conn.config.voice,
                     }
                 )
 
             return {
                 "total_connections": total_count,
                 "busy_connections": busy_count,
-                "idle_connections": idle_count,
-                "active_users": active_users,
-                "max_total": self.config.max_total,
-                "max_idle": self.config.max_idle,
-                "min_idle": self.config.min_idle,
-                "mode": "connection_pool",
+                "idle_connections": 0,  # 不再维护空闲连接
+                "active_users": 0,  # 不再跟踪用户状态
+                "max_concurrent": self.config.max_concurrent,
+                "mode": "simplified_pool_with_dashscope_sdk",
                 "connections": connections,
             }
 
@@ -598,22 +374,13 @@ class TTSConnectionPool:
             except asyncio.CancelledError:
                 pass
 
-        # 关闭所有连接
+        # 关闭所有连接（简化版）
         all_connections = []
 
-        # 收集空闲连接
-        while not self._idle_connections.empty():
-            try:
-                conn = self._idle_connections.get_nowait()
-                all_connections.append(conn)
-            except Empty:
-                break
-
-        # 收集忙碌连接
+        # 收集所有连接
         with self._pool_lock:
-            all_connections.extend(self._busy_connections.values())
+            all_connections.extend(self._all_connections.values())
             self._busy_connections.clear()
-            self._user_playing_status.clear()
             self._all_connections.clear()
 
         # 并发关闭所有连接
@@ -793,12 +560,18 @@ class TTSTaskManager:
         """执行TTS任务"""
         connection = None
         try:
-            # 获取连接（传递音色参数）
-            connection = await self.pool.get_connection(task.user_id, task.voice)
+            # 借用连接（传递音色参数）
+            connection = await self.pool.borrow_connection(task.voice)
             if not connection:
                 logger.error(
-                    f"❌ 无法获取TTS连接，任务: {task.task_id}, 音色: {task.voice}"
+                    f"❌ 无法借用TTS连接，任务: {task.task_id}, 音色: {task.voice}"
                 )
+                return False
+                
+            # 验证连接健康状态
+            if not connection.is_healthy():
+                logger.warning(f"⚠️ TTS连接不健康，标记为错误: {connection.connection_id}")
+                await self.pool.handle_connection_error(connection, Exception("连接状态异常"))
                 return False
 
             # 设置音频回调
@@ -854,9 +627,9 @@ class TTSTaskManager:
             logger.error(f"❌ TTS任务执行异常 {task.task_id}: {e}")
             return False
         finally:
-            # 释放连接
+            # 归还连接
             if connection:
-                await self.pool.release_connection(connection, task.user_id)
+                await self.pool.return_connection(connection)
 
     async def shutdown(self):
         """关闭任务管理器"""
@@ -1029,7 +802,11 @@ async def _tts_speak_stream_disposable(
         return True
 
     except Exception as e:
-        logger.error(f"TTS合成异常，用户: {user_id}: {e}")
+        error_msg = str(e)
+        if "1007" in error_msg or "invalid frame" in error_msg.lower():
+            logger.warning(f"⚠️ TTS WebSocket协议错误，用户: {user_id}: {e}")
+        else:
+            logger.error(f"❌ TTS合成异常，用户: {user_id}: {e}")
         return False
 
     finally:
@@ -1064,8 +841,8 @@ async def interrupt_user_tts(user_id: str) -> bool:
         if task_manager:
             await task_manager.cancel_user_tasks(user_id)
 
-        # 中断连接池中的用户TTS
-        await pool.interrupt_user_tts(user_id)
+        # 注意：新的借用/归还模式下不再跟踪用户连接状态
+        # 用户中断主要通过任务管理器的cancel_user_tasks实现
 
         return True
     except Exception as e:
@@ -1078,10 +855,20 @@ async def interrupt_user_tts(user_id: str) -> bool:
 
 async def initialize_tts_pool_with_manager():
     """初始化带任务管理器的TTS连接池"""
+    import os
     global tts_pool
 
     # 从数据库读取配置
     config = await SystemConfig.objects.aget(pk=1)
+
+    # 设置DashScope SDK环境变量
+    os.environ['DASHSCOPE_CONNECTION_POOL_SIZE'] = str(config.dashscope_connection_pool_size)
+    os.environ['DASHSCOPE_MAXIMUM_ASYNC_REQUESTS'] = str(config.dashscope_max_async_requests)
+    os.environ['DASHSCOPE_MAXIMUM_ASYNC_REQUESTS_PER_HOST'] = str(config.dashscope_max_async_requests_per_host)
+    
+    logger.info(f"🔧 DashScope SDK配置 - 连接池大小: {config.dashscope_connection_pool_size}, "
+                f"最大异步请求: {config.dashscope_max_async_requests}, "
+                f"单Host最大请求: {config.dashscope_max_async_requests_per_host}")
 
     # 检查是否启用连接池模式
     if not config.tts_use_connection_pool:

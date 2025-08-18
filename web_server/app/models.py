@@ -151,29 +151,28 @@ class SystemConfig(models.Model):
     tts_max_concurrent = models.IntegerField(
         default=3, verbose_name="TTS最大并发任务数"
     )
-    tts_pool_max_total = models.IntegerField(
-        default=10, verbose_name="TTS连接池最大连接数"
-    )
     tts_connection_max_error_count = models.IntegerField(
         default=3, verbose_name="TTS连接最大错误次数"
-    )
-    tts_pool_min_idle = models.IntegerField(
-        default=2, verbose_name="TTS连接池最小空闲连接数"
-    )
-    tts_pool_max_idle = models.IntegerField(
-        default=5, verbose_name="TTS连接池最大空闲连接数"
-    )
-    tts_pool_connection_timeout = models.FloatField(
-        default=10.0, verbose_name="TTS连接超时时间（秒）"
-    )
-    tts_pool_cleanup_interval = models.FloatField(
-        default=60.0, verbose_name="TTS连接池清理间隔（秒）"
     )
     tts_connection_max_idle_time = models.FloatField(
         default=300.0, verbose_name="TTS连接最大空闲时间（秒）"
     )
-    tts_pool_max_wait_time = models.FloatField(
-        default=30.0, verbose_name="TTS连接池最大等待时间（秒）"
+
+    # DashScope SDK连接池配置
+    dashscope_connection_pool_size = models.IntegerField(
+        default=32,
+        verbose_name="DashScope连接池大小",
+        help_text="DASHSCOPE_CONNECTION_POOL_SIZE环境变量值，建议与最大异步请求数一致"
+    )
+    dashscope_max_async_requests = models.IntegerField(
+        default=32,
+        verbose_name="DashScope最大异步请求数",
+        help_text="DASHSCOPE_MAXIMUM_ASYNC_REQUESTS环境变量值，推荐与连接池大小一致"
+    )
+    dashscope_max_async_requests_per_host = models.IntegerField(
+        default=32,
+        verbose_name="DashScope单Host最大异步请求数",
+        help_text="DASHSCOPE_MAXIMUM_ASYNC_REQUESTS_PER_HOST环境变量值，推荐与连接池大小一致"
     )
 
     # 页面标题配置
