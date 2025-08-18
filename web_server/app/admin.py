@@ -61,6 +61,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
                 "fields": (
                     "funasr_host",
                     "funasr_port",
+                    "funasr_mode",
                     "funasr_ssl",
                     "funasr_ssl_verify",
                 )
