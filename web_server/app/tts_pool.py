@@ -137,7 +137,8 @@ async def _tts_speak_stream_disposable(
     一次性TTS语音合成 - 依赖DashScope SDK的内部连接池
     """
     try:
-        from app.llm_client import DashScopeRealtimeTTS, TTSConfig
+        from dashscope_realtime import DashScopeRealtimeTTS
+        from dashscope_realtime.tts import TTSConfig
 
         # 获取系统配置
         config = await SystemConfig.objects.aget(pk=1)
