@@ -45,7 +45,6 @@ class SystemConfig(models.Model):
     )
     funasr_port = models.IntegerField(default=10095, verbose_name="FunASR服务器端口")
     funasr_mode = models.CharField(
-        max_length=10,
         default="2pass-offline",
         verbose_name="FunASR模式",
         choices=[("offline", "离线模式"), ("online", "在线模式"), ("2pass-offline", "2pass离线模式")],
