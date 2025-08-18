@@ -15,9 +15,54 @@ def get_system_config_async():
     return SystemConfig.get_config()
 
 
+def extract_language_from_text(text: str) -> str | None:
+    """
+    从识别文本中提取语言标记
+
+    Args:
+        text: 原始识别文本
+
+    Returns:
+        检测到的语言代码，如 'zh', 'yue', 'en' 等，如果没有检测到则返回None
+    """
+    if not text:
+        return None
+
+    # 匹配语言标记，如 <|zh|>, <|yue|>, <|en|> 等
+    language_match = re.search(r"<\|([^|]+)\|>", text)
+    if language_match:
+        return language_match.group(1)
+    
+    return None
+
+
+def get_tts_voice_by_language(language: str, config) -> str:
+    """
+    根据语言代码获取对应的TTS音色
+
+    Args:
+        language: 语言代码，如 'zh', 'yue', 'en' 等
+        config: 系统配置对象
+
+    Returns:
+        对应的TTS音色名称
+    """
+    # 语言到音色的映射
+    language_voice_map = {
+        'zh': config.tts_mandarin_voice,      # 中文普通话
+        'yue': config.tts_cantonese_voice,    # 粤语
+        'en': config.tts_english_voice,       # 英语
+        'ja': config.tts_japanese_voice,      # 日语
+        'ko': config.tts_korean_voice,        # 韩语
+    }
+    
+    # 返回对应语言的音色，如果没有找到则返回默认音色
+    return language_voice_map.get(language, config.tts_default_voice)
+
+
 def clean_recognition_text(text: str) -> str:
     """
-    清理识别文本，移除语言标记和元数据前缀
+    清理识别文本，移除语言标记和元数据前缀（仅用于显示）
 
     Args:
         text: 原始识别文本
@@ -39,6 +84,40 @@ def clean_recognition_text(text: str) -> str:
     cleaned_text = cleaned_text.strip()
 
     return cleaned_text
+
+
+def process_recognition_result(raw_text: str, config) -> dict:
+    """
+    处理ASR识别结果，提取语言信息和清理文本
+
+    Args:
+        raw_text: 原始识别文本
+        config: 系统配置对象
+
+    Returns:
+        包含清理后文本、检测语言和推荐音色的字典
+    """
+    if not raw_text:
+        return {
+            'cleaned_text': '',
+            'detected_language': None,
+            'tts_voice': config.tts_default_voice
+        }
+
+    # 提取语言标记
+    detected_language = extract_language_from_text(raw_text)
+    
+    # 清理文本（移除所有标记）
+    cleaned_text = clean_recognition_text(raw_text)
+    
+    # 根据检测到的语言选择TTS音色
+    tts_voice = get_tts_voice_by_language(detected_language, config) if detected_language else config.tts_default_voice
+    
+    return {
+        'cleaned_text': cleaned_text,
+        'detected_language': detected_language,
+        'tts_voice': tts_voice
+    }
 
 
 class SessionManager:

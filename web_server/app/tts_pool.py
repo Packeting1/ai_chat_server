@@ -377,7 +377,7 @@ class TTSConnectionPool:
         return {
             "api_key": config.tts_api_key,
             "model": config.tts_model,
-            "voice": config.tts_voice,
+            "voice": config.tts_default_voice,  # 使用默认音色
             "sample_rate": config.tts_sample_rate,
             "volume": config.tts_volume,
             "speech_rate": config.tts_speech_rate,
@@ -727,7 +727,7 @@ class TTSTaskManager:
 
 
 async def tts_speak_stream(
-    text: str, user_id: str, audio_callback: Callable[[bytes], None]
+    text: str, user_id: str, audio_callback: Callable[[bytes], None], voice: str = None
 ) -> bool:
     """
     使用连接池的TTS语音合成
@@ -736,6 +736,7 @@ async def tts_speak_stream(
         text: 要合成的文本
         user_id: 用户ID
         audio_callback: 音频数据回调函数
+        voice: 指定的音色名称，如果为None则使用默认音色
 
     Returns:
         bool: 是否成功
@@ -759,6 +760,12 @@ async def tts_speak_stream(
     if not config["api_key"]:
         logger.error(f"❌ TTS API密钥未配置，用户: {user_id}")
         return False
+    
+    # 如果指定了音色，则覆盖默认音色
+    if voice:
+        config = config.copy()  # 创建配置副本以避免修改原配置
+        config["voice"] = voice
+        logger.info(f"🎵 用户 {user_id} 使用指定音色: {voice}")
 
     # 检查是否启用连接池模式
     system_config = await SystemConfig.objects.aget(pk=1)

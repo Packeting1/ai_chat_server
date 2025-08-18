@@ -41,7 +41,7 @@ class SystemConfig(models.Model):
 
     # FunASR配置
     funasr_host = models.CharField(
-        max_length=100, default="funasr", verbose_name="FunASR服务器地址"
+        max_length=100, default="funasr_server", verbose_name="FunASR服务器地址"
     )
     funasr_port = models.IntegerField(default=10095, verbose_name="FunASR服务器端口")
     funasr_ssl = models.BooleanField(default=False, verbose_name="使用SSL")
@@ -85,9 +85,6 @@ class SystemConfig(models.Model):
     tts_model = models.CharField(
         max_length=50, default="cosyvoice-v2", verbose_name="TTS模型名称"
     )
-    tts_voice = models.CharField(
-        max_length=50, default="longxiaochun_v2", verbose_name="TTS音色名称"
-    )
     tts_sample_rate = models.IntegerField(
         default=22050,
         choices=[
@@ -116,6 +113,38 @@ class SystemConfig(models.Model):
         verbose_name="TTS音频格式",
         choices=[("pcm", "PCM"), ("mp3", "MP3"), ("wav", "WAV")],
         help_text="音频输出格式",
+    )
+
+    # TTS语言配置
+    tts_default_voice = models.CharField(
+        max_length=50,
+        default="longanran",
+        verbose_name="TTS默认音色"
+    )
+    tts_mandarin_voice = models.CharField(
+        max_length=50,
+        default="longanran",
+        verbose_name="TTS普通话音色"
+    )
+    tts_cantonese_voice = models.CharField(
+        max_length=50,
+        default="longtao_v2",
+        verbose_name="TTS粤语音色"
+    )
+    tts_english_voice = models.CharField(
+        max_length=50,
+        default="loongcally_v2",
+        verbose_name="TTS英语音色"
+    )
+    tts_japanese_voice = models.CharField(
+        max_length=50,
+        default="loongtomoka_v2",
+        verbose_name="TTS日语音色"
+    )
+    tts_korean_voice = models.CharField(
+        max_length=50,
+        default="loongkyong_v2",
+        verbose_name="TTS韩语音色"
     )
 
     # TTS连接池配置
@@ -219,63 +248,6 @@ class SystemConfig(models.Model):
         """获取FunASR连接URI"""
         protocol = "wss" if self.funasr_ssl else "ws"
         return f"{protocol}://{self.funasr_host}:{self.funasr_port}"
-
-    def to_dict(self):
-        """转换为字典格式"""
-        return {
-            "llm_api_base": self.llm_api_base,
-            "llm_api_key": self.llm_api_key,
-            "llm_model": self.llm_model,
-            "web_host": self.web_host,
-            "web_http_port": self.web_http_port,
-            "web_https_port": self.web_https_port,
-            "web_ssl_enabled": self.web_ssl_enabled,
-            "web_ssl_cert_file": self.web_ssl_cert_file.path
-            if self.web_ssl_cert_file
-            else "",
-            "web_ssl_key_file": self.web_ssl_key_file.path
-            if self.web_ssl_key_file
-            else "",
-            "funasr_host": self.funasr_host,
-            "funasr_port": self.funasr_port,
-            "funasr_ssl": self.funasr_ssl,
-            "funasr_ssl_verify": self.funasr_ssl_verify,
-            "use_connection_pool": self.use_connection_pool,
-            "pool_min_connections": self.pool_min_connections,
-            "pool_max_connections": self.pool_max_connections,
-            "pool_max_idle_time": self.pool_max_idle_time,
-            "session_cleanup_hours": self.session_cleanup_hours,
-            "max_conversation_history": self.max_conversation_history,
-            "continuous_conversation": self.continuous_conversation,
-            "tts_api_key": self.tts_api_key,
-            "tts_model": self.tts_model,
-            "tts_voice": self.tts_voice,
-            "tts_sample_rate": self.tts_sample_rate,
-            "tts_enabled": self.tts_enabled,
-            "tts_use_connection_pool": self.tts_use_connection_pool,
-            "tts_pool_max_total": self.tts_pool_max_total,
-            "tts_pool_max_idle": self.tts_pool_max_idle,
-            "tts_pool_min_idle": self.tts_pool_min_idle,
-            "tts_pool_max_wait_time": self.tts_pool_max_wait_time,
-            "tts_pool_connection_timeout": self.tts_pool_connection_timeout,
-            "tts_pool_cleanup_interval": self.tts_pool_cleanup_interval,
-            "tts_max_concurrent": self.tts_max_concurrent,
-            "tts_connection_max_idle_time": self.tts_connection_max_idle_time,
-            "tts_connection_max_error_count": self.tts_connection_max_error_count,
-            "tts_volume": self.tts_volume,
-            "tts_speech_rate": self.tts_speech_rate,
-            "tts_pitch_rate": self.tts_pitch_rate,
-            "tts_audio_format": self.tts_audio_format,
-            "page_title_zh": self.page_title_zh,
-            "page_title_en": self.page_title_en,
-            "main_title_zh": self.main_title_zh,
-            "main_title_en": self.main_title_en,
-            "logo_image": self.logo_image.url if self.logo_image else "",
-            "ai_system_prompt": self.ai_system_prompt,
-            "filter_think_tags": self.filter_think_tags,
-            "use_nothink_prefix": self.use_nothink_prefix,
-        }
-
 
 class UserSession(models.Model):
     """用户会话模型"""

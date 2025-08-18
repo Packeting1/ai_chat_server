@@ -85,7 +85,6 @@ class SystemConfigAdmin(admin.ModelAdmin):
                     "tts_enabled",
                     "tts_api_key",
                     "tts_model",
-                    "tts_voice",
                     "tts_sample_rate",
                 ),
                 "description": "DashScope为阿里云旗下的AI模型服务。",
@@ -101,6 +100,20 @@ class SystemConfigAdmin(admin.ModelAdmin):
                     "tts_audio_format",
                 ),
                 "description": "调整TTS语音的音量、语速、音调和输出格式。",
+            },
+        ),
+        (
+            "TTS语言配置",
+            {
+                "fields": (
+                    "tts_default_voice",
+                    "tts_mandarin_voice",
+                    "tts_cantonese_voice",
+                    "tts_english_voice",
+                    "tts_japanese_voice",
+                    "tts_korean_voice",
+                ),
+                "description": "配置TTS语言音色。ASR必须使用SenseVoice模型才可使用此功能。否则只可使用默认音色。",
             },
         ),
         (

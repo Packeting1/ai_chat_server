@@ -6,7 +6,7 @@ from typing import Any
 
 import websockets
 
-from .utils import get_system_config_async
+from .utils import get_system_config_async, process_recognition_result
 
 logger = logging.getLogger(__name__)
 
@@ -238,17 +238,18 @@ class FunASRClient:
 
                                 # 实时发送识别片段到前端
                                 if progress_callback:
-                                    from .utils import clean_recognition_text
-
-                                    cleaned_text = clean_recognition_text(raw_text)
-                                    cleaned_accumulated = clean_recognition_text(
-                                        accumulated_text.strip()
+                                    # 获取配置并处理识别结果
+                                    config = await get_system_config_async()
+                                    result = process_recognition_result(raw_text, config)
+                                    accumulated_result = process_recognition_result(
+                                        accumulated_text.strip(), config
                                     )
+                                    
                                     await progress_callback(
                                         {
                                             "type": "recognition_segment",
-                                            "text": cleaned_text,
-                                            "accumulated": cleaned_accumulated,
+                                            "text": result['cleaned_text'],
+                                            "accumulated": accumulated_result['cleaned_text'],
                                             "mode": mode,
                                         }
                                     )
@@ -291,9 +292,9 @@ class FunASRClient:
             result_task.cancel()
 
             # 清理并返回最终结果
-            from .utils import clean_recognition_text
-
-            return clean_recognition_text(accumulated_text.strip())
+            config = await get_system_config_async()
+            result = process_recognition_result(accumulated_text.strip(), config)
+            return result['cleaned_text']
 
         except Exception as e:
             logger.error(f"音频识别错误: {e}")
