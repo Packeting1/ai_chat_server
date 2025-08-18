@@ -37,7 +37,7 @@ def extract_language_from_text(text: str) -> str | None:
         detected_lang = language_match.group(1)
         logger.info(f"✅ 语言检测成功: '{detected_lang}' (从文本: '{text[:50]}...')")
         return detected_lang
-    
+
     logger.info(f"❌ 未检测到语言标记 (文本: '{text[:50]}...')")
     return None
 
@@ -55,22 +55,22 @@ def get_tts_voice_by_language(language: str, config) -> str:
     """
     # 语言到音色的映射
     language_voice_map = {
-        'zh': config.tts_mandarin_voice,      # 中文普通话
-        'yue': config.tts_cantonese_voice,    # 粤语
-        'en': config.tts_english_voice,       # 英语
-        'ja': config.tts_japanese_voice,      # 日语
-        'ko': config.tts_korean_voice,        # 韩语
+        "zh": config.tts_mandarin_voice,  # 中文普通话
+        "yue": config.tts_cantonese_voice,  # 粤语
+        "en": config.tts_english_voice,  # 英语
+        "ja": config.tts_japanese_voice,  # 日语
+        "ko": config.tts_korean_voice,  # 韩语
     }
-    
+
     # 返回对应语言的音色，如果没有找到则返回默认音色
     selected_voice = language_voice_map.get(language, config.tts_default_voice)
-    
+
     # 添加调试日志
     if language in language_voice_map:
         logger.info(f"🎵 语言'{language}' -> 音色'{selected_voice}'")
     else:
         logger.info(f"🎵 未知语言'{language}' -> 默认音色'{selected_voice}'")
-    
+
     return selected_voice
 
 
@@ -113,24 +113,28 @@ def process_recognition_result(raw_text: str, config) -> dict:
     """
     if not raw_text:
         return {
-            'cleaned_text': '',
-            'detected_language': None,
-            'tts_voice': config.tts_default_voice
+            "cleaned_text": "",
+            "detected_language": None,
+            "tts_voice": config.tts_default_voice,
         }
 
     # 提取语言标记
     detected_language = extract_language_from_text(raw_text)
-    
+
     # 清理文本（移除所有标记）
     cleaned_text = clean_recognition_text(raw_text)
-    
+
     # 根据检测到的语言选择TTS音色
-    tts_voice = get_tts_voice_by_language(detected_language, config) if detected_language else config.tts_default_voice
-    
+    tts_voice = (
+        get_tts_voice_by_language(detected_language, config)
+        if detected_language
+        else config.tts_default_voice
+    )
+
     return {
-        'cleaned_text': cleaned_text,
-        'detected_language': detected_language,
-        'tts_voice': tts_voice
+        "cleaned_text": cleaned_text,
+        "detected_language": detected_language,
+        "tts_voice": tts_voice,
     }
 
 

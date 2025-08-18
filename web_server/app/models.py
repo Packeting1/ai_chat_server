@@ -47,7 +47,11 @@ class SystemConfig(models.Model):
     funasr_mode = models.CharField(
         default="2pass-offline",
         verbose_name="FunASR模式",
-        choices=[("offline", "离线模式"), ("online", "在线模式"), ("2pass-offline", "2pass离线模式")],
+        choices=[
+            ("offline", "离线模式"),
+            ("online", "在线模式"),
+            ("2pass-offline", "2pass离线模式"),
+        ],
     )
     funasr_ssl = models.BooleanField(default=False, verbose_name="使用SSL")
     funasr_ssl_verify = models.BooleanField(default=False, verbose_name="验证SSL证书")
@@ -122,34 +126,22 @@ class SystemConfig(models.Model):
 
     # TTS语言配置
     tts_default_voice = models.CharField(
-        max_length=50,
-        default="longanran",
-        verbose_name="TTS默认音色"
+        max_length=50, default="longanran", verbose_name="TTS默认音色"
     )
     tts_mandarin_voice = models.CharField(
-        max_length=50,
-        default="longanran",
-        verbose_name="TTS普通话音色"
+        max_length=50, default="longanran", verbose_name="TTS普通话音色"
     )
     tts_cantonese_voice = models.CharField(
-        max_length=50,
-        default="longtao_v2",
-        verbose_name="TTS粤语音色"
+        max_length=50, default="longtao_v2", verbose_name="TTS粤语音色"
     )
     tts_english_voice = models.CharField(
-        max_length=50,
-        default="loongcally_v2",
-        verbose_name="TTS英语音色"
+        max_length=50, default="loongcally_v2", verbose_name="TTS英语音色"
     )
     tts_japanese_voice = models.CharField(
-        max_length=50,
-        default="loongtomoka_v2",
-        verbose_name="TTS日语音色"
+        max_length=50, default="loongtomoka_v2", verbose_name="TTS日语音色"
     )
     tts_korean_voice = models.CharField(
-        max_length=50,
-        default="loongkyong_v2",
-        verbose_name="TTS韩语音色"
+        max_length=50, default="loongkyong_v2", verbose_name="TTS韩语音色"
     )
 
     # TTS连接池配置
@@ -253,6 +245,7 @@ class SystemConfig(models.Model):
         """获取FunASR连接URI"""
         protocol = "wss" if self.funasr_ssl else "ws"
         return f"{protocol}://{self.funasr_host}:{self.funasr_port}"
+
 
 class UserSession(models.Model):
     """用户会话模型"""

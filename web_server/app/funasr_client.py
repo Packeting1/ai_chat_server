@@ -16,7 +16,7 @@ async def create_stream_config_async() -> dict[str, Any]:
     # 获取系统配置中的FunASR模式
     config = await get_system_config_async()
     funasr_mode = config.funasr_mode
-    
+
     return {
         "mode": funasr_mode,
         "chunk_size": [5, 10, 5],
@@ -244,16 +244,20 @@ class FunASRClient:
                                 if progress_callback:
                                     # 获取配置并处理识别结果
                                     config = await get_system_config_async()
-                                    result = process_recognition_result(raw_text, config)
+                                    result = process_recognition_result(
+                                        raw_text, config
+                                    )
                                     accumulated_result = process_recognition_result(
                                         accumulated_text.strip(), config
                                     )
-                                    
+
                                     await progress_callback(
                                         {
                                             "type": "recognition_segment",
-                                            "text": result['cleaned_text'],
-                                            "accumulated": accumulated_result['cleaned_text'],
+                                            "text": result["cleaned_text"],
+                                            "accumulated": accumulated_result[
+                                                "cleaned_text"
+                                            ],
                                             "mode": mode,
                                         }
                                     )
@@ -298,7 +302,7 @@ class FunASRClient:
             # 清理并返回最终结果
             config = await get_system_config_async()
             result = process_recognition_result(accumulated_text.strip(), config)
-            return result['cleaned_text']
+            return result["cleaned_text"]
 
         except Exception as e:
             logger.error(f"音频识别错误: {e}")

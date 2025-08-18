@@ -110,7 +110,7 @@ CACHES = {
         "LOCATION": f"redis://{REDIS_HOST}:{REDIS_PORT}/1",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        }
+        },
     }
 }
 
@@ -178,21 +178,16 @@ LOGGING = {
         },
     },
     "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "simple",
-            "level": "INFO",
-        },
+        "console": {"class": "logging.StreamHandler", "formatter": "simple"},
         "file": {
             "class": "logging.FileHandler",
             "filename": "django.log",
             "formatter": "verbose",
-            "level": "WARNING",
         },
     },
     "root": {
         "handlers": ["console"],
-        "level": "WARNING",  # 只显示警告及以上级别的日志
+        "level": "WARNING",
     },
     "loggers": {
         "django": {
@@ -202,7 +197,7 @@ LOGGING = {
         },
         "app": {
             "handlers": ["console"],
-            "level": "WARNING",  # 应用日志也设置为WARNING级别
+            "level": "INFO",  # 应用日志设置为INFO级别
             "propagate": False,
         },
         "channels": {

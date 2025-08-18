@@ -13,7 +13,11 @@ from .funasr_pool import get_connection_pool
 from .llm_client import call_llm_stream, filter_think_tags
 from .models import SystemConfig
 from .tts_pool import get_tts_pool, interrupt_user_tts, tts_speak_stream
-from .utils import clean_recognition_text, get_system_config_async, session_manager, process_recognition_result
+from .utils import (
+    get_system_config_async,
+    process_recognition_result,
+    session_manager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -379,16 +383,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         if mode == "2pass-online":
                             # 实时结果，更新显示
                             self.accumulated_text = raw_text
-                            
+
                             # 获取配置并处理识别结果
                             config = await get_system_config_async()
                             result = process_recognition_result(raw_text, config)
-                            display_text = result['cleaned_text']
-                            
+                            display_text = result["cleaned_text"]
+
                             # 更新检测到的语言和TTS音色（实时结果也可能包含语言信息）
-                            if result['detected_language']:
-                                self.detected_language = result['detected_language']
-                                self.tts_voice = result['tts_voice']
+                            if result["detected_language"]:
+                                self.detected_language = result["detected_language"]
+                                self.tts_voice = result["tts_voice"]
 
                             # 只有在AI正在说话且识别到有效文本时才中断TTS
                             if (
@@ -414,17 +418,19 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         elif mode == "2pass-offline" or mode == "offline":
                             # 最终结果，检查是否需要调用LLM
                             self.accumulated_text = raw_text
-                            
+
                             # 获取配置并处理识别结果
                             config = await get_system_config_async()
                             result = process_recognition_result(raw_text, config)
-                            display_text = result['cleaned_text']
-                            
+                            display_text = result["cleaned_text"]
+
                             # 更新检测到的语言和TTS音色（最终结果通常包含更准确的语言信息）
-                            if result['detected_language']:
-                                self.detected_language = result['detected_language']
-                                self.tts_voice = result['tts_voice']
-                                logger.info(f"🌐 用户 {self.user_id} 检测到语言: {self.detected_language}, 选择音色: {self.tts_voice}")
+                            if result["detected_language"]:
+                                self.detected_language = result["detected_language"]
+                                self.tts_voice = result["tts_voice"]
+                                logger.info(
+                                    f"🌐 用户 {self.user_id} 检测到语言: {self.detected_language}, 选择音色: {self.tts_voice}"
+                                )
 
                             # 检查是否有有效的新文本且对话仍然活跃，同时确保连接状态正常
                             if (
@@ -666,7 +672,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
                 # TTS语音合成（确保即使TTS失败也不会影响对话流程）
                 try:
-                    await self.handle_tts_speak(filtered_response, self.detected_language, self.tts_voice)
+                    await self.handle_tts_speak(
+                        filtered_response, self.detected_language, self.tts_voice
+                    )
                 except Exception as tts_error:
                     logger.error(f"🚨 TTS调用失败，用户: {self.user_id}: {tts_error}")
                     # TTS失败时发送完成通知，确保前端状态恢复
@@ -929,7 +937,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"发送conversation_paused消息失败: {e}")
 
-    async def handle_tts_speak(self, text: str, detected_language: str = None, tts_voice: str = None):
+    async def handle_tts_speak(
+        self, text: str, detected_language: str = None, tts_voice: str = None
+    ):
         """处理TTS语音合成"""
         try:
             # 检查TTS是否启用
@@ -1058,7 +1068,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
             try:
                 # 使用TTS连接池进行语音合成，传递检测到的音色
-                success = await tts_speak_stream(text, self.user_id, on_audio_data, tts_voice)
+                success = await tts_speak_stream(
+                    text, self.user_id, on_audio_data, tts_voice
+                )
             finally:
                 # 停止音频发送任务
                 audio_task.cancel()
@@ -1303,11 +1315,11 @@ class UploadConsumer(AsyncWebsocketConsumer):
 
                         if "text" in data and data["text"].strip():
                             raw_text = data["text"].strip()
-                            
+
                             # 获取配置并处理识别结果
                             config = await get_system_config_async()
                             result = process_recognition_result(raw_text, config)
-                            display_text = result['cleaned_text']
+                            display_text = result["cleaned_text"]
                             mode = data.get("mode", "")
 
                             if mode == "2pass-online":
@@ -1336,7 +1348,9 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                         {
                                             "type": "recognition_segment",
                                             "text": display_text,
-                                            "accumulated": accumulated_result['cleaned_text'],
+                                            "accumulated": accumulated_result[
+                                                "cleaned_text"
+                                            ],
                                             "mode": mode,
                                         }
                                     )
@@ -1559,7 +1573,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
                                 "type": "llm_complete",
                                 "recognized_text": process_recognition_result(
                                     accumulated_text, config
-                                )['cleaned_text'],
+                                )["cleaned_text"],
                                 "llm_response": filtered_response,
                             }
                         )
