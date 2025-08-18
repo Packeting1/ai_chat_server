@@ -12,7 +12,6 @@ class SystemConfigAdmin(admin.ModelAdmin):
         "pool_max_connections",
         "tts_enabled",
         "tts_use_connection_pool",
-        "tts_max_concurrent",
         "updated_at",
     ]
     fieldsets = (
