@@ -144,9 +144,12 @@ class SystemConfig(models.Model):
         max_length=50, default="loongkyong_v2", verbose_name="TTS韩语音色"
     )
 
-    # TTS连接池配置（简化版）
+    # TTS连接池配置
     tts_use_connection_pool = models.BooleanField(
         default=True, verbose_name="启用TTS连接池模式"
+    )
+    tts_pool_max_connections = models.IntegerField(
+        default=10, verbose_name="TTS连接池最大连接数"
     )
     tts_connection_max_error_count = models.IntegerField(
         default=3, verbose_name="TTS连接最大错误次数"
@@ -154,8 +157,9 @@ class SystemConfig(models.Model):
     tts_connection_max_idle_time = models.FloatField(
         default=300.0, verbose_name="TTS连接最大空闲时间（秒）"
     )
-
-
+    tts_pool_cleanup_interval = models.FloatField(
+        default=60.0, verbose_name="TTS连接池清理间隔（秒）"
+    )
 
     # 页面标题配置
     page_title_zh = models.CharField(
