@@ -185,35 +185,139 @@ class TTSConnectionPool:
             if self._executor is None:
                 self._executor = ThreadPoolExecutor(max_workers=self.config.max_total)
 
-    async def get_connection(self, user_id: str) -> TTSConnection | None:
+    async def get_connection(self, user_id: str, voice: str = None) -> TTSConnection | None:
         """获取可用连接"""
         if self._shutdown:
             return None
 
         async with self._async_lock:
-            # 检查用户是否已有活跃连接
-            if user_id in self._user_playing_status:
-                existing_conn = self._user_playing_status[user_id]
-                if existing_conn.is_healthy():
-                    return existing_conn
-                else:
-                    # 清理不健康的连接
-                    await self._remove_connection(existing_conn)
+            # 如果指定了音色，检查是否需要创建新连接
+            if voice:
+                # 检查用户是否已有活跃连接，且音色匹配
+                if user_id in self._user_playing_status:
+                    existing_conn = self._user_playing_status[user_id]
+                    if existing_conn.is_healthy() and existing_conn.config.voice == voice:
+                        logger.debug(f"🎵 复用匹配音色连接: {voice}")
+                        return existing_conn
+                    else:
+                        # 音色不匹配或连接不健康，释放旧连接
+                        logger.info(f"🔄 音色切换 {existing_conn.config.voice} -> {voice}，释放旧连接")
+                        await self._remove_connection(existing_conn)
+                
+                # 尝试找到匹配音色的空闲连接
+                connection = await self._borrow_connection_by_voice(voice)
+                if connection:
+                    connection.is_busy = True
+                    connection.user_id = user_id
+                    connection.mark_used()
 
-            # 尝试从空闲池获取连接
-            connection = await self._borrow_connection()
-            if connection:
-                connection.is_busy = True
-                connection.user_id = user_id
-                connection.mark_used()
+                    with self._pool_lock:
+                        self._busy_connections[connection.connection_id] = connection
+                        self._user_playing_status[user_id] = connection
 
-                with self._pool_lock:
-                    self._busy_connections[connection.connection_id] = connection
-                    self._user_playing_status[user_id] = connection
+                    logger.debug(f"📤 分配音色连接给用户 {user_id}: {connection.connection_id} (音色: {voice})")
+                    return connection
+                
+                # 没有匹配的连接，创建新连接（使用指定音色）
+                return await self._create_connection_with_voice(user_id, voice)
+            
+            else:
+                # 没有指定音色，使用原来的逻辑
+                # 检查用户是否已有活跃连接
+                if user_id in self._user_playing_status:
+                    existing_conn = self._user_playing_status[user_id]
+                    if existing_conn.is_healthy():
+                        return existing_conn
+                    else:
+                        # 清理不健康的连接
+                        await self._remove_connection(existing_conn)
 
-                logger.debug(f"📤 分配连接给用户 {user_id}: {connection.connection_id}")
-                return connection
+                # 尝试从空闲池获取连接
+                connection = await self._borrow_connection()
+                if connection:
+                    connection.is_busy = True
+                    connection.user_id = user_id
+                    connection.mark_used()
 
+                    with self._pool_lock:
+                        self._busy_connections[connection.connection_id] = connection
+                        self._user_playing_status[user_id] = connection
+
+                    logger.debug(f"📤 分配连接给用户 {user_id}: {connection.connection_id}")
+                    return connection
+
+                return None
+
+    async def _borrow_connection_by_voice(self, voice: str) -> TTSConnection | None:
+        """根据音色借用空闲连接"""
+        with self._pool_lock:
+            for conn in list(self._idle_connections):
+                if not conn.is_busy and conn.config.voice == voice and conn.is_healthy():
+                    self._idle_connections.remove(conn)
+                    logger.debug(f"🎵 找到匹配音色的空闲连接: {voice}")
+                    return conn
+        return None
+
+    async def _create_connection_with_voice(self, user_id: str, voice: str) -> TTSConnection | None:
+        """为指定用户和音色创建新连接"""
+        try:
+            # 检查是否还能创建新连接
+            with self._pool_lock:
+                if len(self._all_connections) >= self.config.max_total:
+                    logger.warning(f"⚠️ TTS连接池已满，无法为音色 {voice} 创建新连接")
+                    return None
+
+            # 获取配置并修改音色
+            config_dict = await self.factory.tts_config_getter()
+            config_dict = config_dict.copy()
+            config_dict["voice"] = voice
+            
+            system_config = await self.factory.system_config_getter()
+
+            tts_config = TTSConfig(
+                model=config_dict["model"],
+                voice=voice,  # 使用指定音色
+                sample_rate=config_dict["sample_rate"],
+                volume=config_dict["volume"],
+                speech_rate=config_dict["speech_rate"],
+                pitch_rate=config_dict["pitch_rate"],
+                audio_format=config_dict["audio_format"],
+            )
+
+            tts_client = DashScopeRealtimeTTS(
+                api_key=config_dict["api_key"], config=tts_config
+            )
+
+            with self.factory._lock:
+                self.factory._connection_counter += 1
+                connection_id = f"tts_conn_{self.factory._connection_counter}_{int(time.time())}"
+
+            connection = TTSConnection(
+                tts_client=tts_client,
+                config=tts_config,
+                created_at=time.time(),
+                last_used=time.time(),
+                connection_id=connection_id,
+                max_error_count=system_config.tts_connection_max_error_count,
+                max_idle_time=system_config.tts_connection_max_idle_time,
+                is_busy=True,
+                user_id=user_id,
+            )
+
+            # 连接到TTS服务
+            await connection.tts_client.connect()
+            connection.is_connected = True
+
+            with self._pool_lock:
+                self._all_connections[connection_id] = connection
+                self._busy_connections[connection_id] = connection
+                self._user_playing_status[user_id] = connection
+
+            logger.info(f"🎵 为用户 {user_id} 创建新的音色连接: {voice} ({connection_id})")
+            return connection
+
+        except Exception as e:
+            logger.error(f"❌ 创建音色连接失败 (音色: {voice}): {e}")
             return None
 
     async def release_connection(self, conn: TTSConnection, user_id: str):
@@ -502,6 +606,7 @@ class TTSTask:
     user_id: str
     text: str
     audio_callback: Callable[[bytes], None]
+    voice: str | None = None  # 指定的音色
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     completed_at: float | None = None
@@ -529,7 +634,7 @@ class TTSTaskManager:
             self._worker_tasks.append(worker)
 
     async def submit_task(
-        self, text: str, user_id: str, audio_callback: Callable[[bytes], None]
+        self, text: str, user_id: str, audio_callback: Callable[[bytes], None], voice: str = None
     ) -> str:
         """提交TTS任务"""
         if self._shutdown:
@@ -540,7 +645,7 @@ class TTSTaskManager:
             task_id = f"tts_task_{self._task_counter}_{int(time.time())}"
 
         task = TTSTask(
-            task_id=task_id, user_id=user_id, text=text, audio_callback=audio_callback
+            task_id=task_id, user_id=user_id, text=text, audio_callback=audio_callback, voice=voice
         )
 
         await self._task_queue.put(task)
@@ -643,10 +748,10 @@ class TTSTaskManager:
         """执行TTS任务"""
         connection = None
         try:
-            # 获取连接
-            connection = await self.pool.get_connection(task.user_id)
+            # 获取连接（传递音色参数）
+            connection = await self.pool.get_connection(task.user_id, task.voice)
             if not connection:
-                logger.error(f"❌ 无法获取TTS连接，任务: {task.task_id}")
+                logger.error(f"❌ 无法获取TTS连接，任务: {task.task_id}, 音色: {task.voice}")
                 return False
 
             # 设置音频回调
@@ -775,7 +880,7 @@ async def tts_speak_stream(
     task_manager = getattr(pool, "_task_manager", None) if use_pool else None
     if task_manager and use_pool:
         try:
-            task_id = await task_manager.submit_task(text, user_id, audio_callback)
+            task_id = await task_manager.submit_task(text, user_id, audio_callback, voice)
 
             # 等待任务完成（简化版，实际可以异步处理）
             max_wait = 30  # 最大等待30秒
@@ -795,17 +900,23 @@ async def tts_speak_stream(
             return False
     else:
         # 降级到一次性连接模式
-        return await _tts_speak_stream_disposable(text, user_id, audio_callback)
+        return await _tts_speak_stream_disposable(text, user_id, audio_callback, voice)
 
 
 async def _tts_speak_stream_disposable(
-    text: str, user_id: str, audio_callback: Callable[[bytes], None]
+    text: str, user_id: str, audio_callback: Callable[[bytes], None], voice: str = None
 ) -> bool:
     """
     降级：一次性TTS语音合成 - 每次创建新连接，完成后立即销毁
     """
     pool = await get_tts_pool()
     config = await pool._get_tts_config()
+
+    # 如果指定了音色，则覆盖默认音色
+    if voice:
+        config = config.copy()
+        config["voice"] = voice
+        logger.info(f"🎵 一次性连接使用指定音色: {voice}")
 
     # 创建一次性TTS客户端
     tts_client = None

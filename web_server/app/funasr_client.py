@@ -13,8 +13,12 @@ logger = logging.getLogger(__name__)
 
 async def create_stream_config_async() -> dict[str, Any]:
     """创建FunASR流配置（异步版本）"""
+    # 获取系统配置中的FunASR模式
+    config = await get_system_config_async()
+    funasr_mode = config.funasr_mode
+    
     return {
-        "mode": "2pass",
+        "mode": funasr_mode,
         "chunk_size": [5, 10, 5],
         "chunk_interval": 10,
         "wav_name": "stream",
@@ -200,7 +204,7 @@ class FunASRClient:
 
             # 使用官方HTML文件模式的配置：offline模式
             config = {
-                "mode": "offline",  # 关键：文件模式使用offline而不是2pass
+                "mode": "offline",
                 "chunk_size": [5, 10, 5],
                 "chunk_interval": 10,
                 "audio_fs": sample_rate,
