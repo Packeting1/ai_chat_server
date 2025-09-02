@@ -692,7 +692,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     # 一次性对话模式：发送暂停消息（但只在TTS未启用时才在这里发送）
                     if not config.tts_enabled:
                         await self.send_conversation_paused_message()
-                        await self.force_disconnect_after_delay()
                     # 如果TTS启用，暂停消息将在TTS完成后发送
 
         except Exception as e:
@@ -1123,11 +1122,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     )
                 )
 
-                # 检查是否为一次性对话模式，如果是则发送暂停消息并断开连接
+                # 检查是否为一次性对话模式，如果是则发送暂停消息（保持连接）
                 config = await SystemConfig.objects.aget(pk=1)
                 if not config.continuous_conversation:
                     await self.send_conversation_paused_message()
-                    await self.force_disconnect_after_delay()
 
             else:
                 # TTS失败时发送错误通知并确保状态恢复
@@ -1150,11 +1148,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     )
                 )
 
-                # 即使TTS失败，在一次性对话模式下也要发送暂停消息并断开连接
+                # 即使TTS失败，在一次性对话模式下也要发送暂停消息（保持连接）
                 config = await SystemConfig.objects.aget(pk=1)
                 if not config.continuous_conversation:
                     await self.send_conversation_paused_message()
-                    await self.force_disconnect_after_delay()
 
         except Exception as e:
             logger.error(
@@ -1186,11 +1183,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 )
             )
 
-            # TTS异常时，也要检查是否需要发送暂停消息并断开连接
+            # TTS异常时，也要检查是否需要发送暂停消息（保持连接）
             config = await SystemConfig.objects.aget(pk=1)
             if not config.continuous_conversation:
                 await self.send_conversation_paused_message()
-                await self.force_disconnect_after_delay()
 
 
 class UploadConsumer(AsyncWebsocketConsumer):

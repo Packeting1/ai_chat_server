@@ -1020,7 +1020,7 @@ function stopStreaming() {
     resetButtonToDefault();
 
     // 使用jQuery链式调用优雅地更新UI
-            $('#currentText').text(getLangText('waitingToStart')).removeClass('partial-text');
+        $('#currentText').text(getLangText('waitingToStart')).removeClass('partial-text');
 
     // 更新状态显示
     updateMemoryStatus();
@@ -1030,6 +1030,32 @@ function stopStreaming() {
     ResourceManager.cleanupAll();
 
     console.log('✅ 流式对话已停止，资源已清理');
+}
+
+/**
+ * 停止录音但保持WebSocket连接（用于一次性对话模式）
+ */
+function stopRecordingKeepConnection() {
+    // 更新状态
+    isStreaming = false;
+    conversationCount = 0;
+
+    // 重置按钮到默认状态
+    resetButtonToDefault();
+
+    // 使用jQuery链式调用优雅地更新UI
+    $('#currentText').text(getLangText('waitingToStart')).removeClass('partial-text');
+
+    // 更新状态显示
+    updateMemoryStatus();
+    updateUserInfo(null, 0);
+
+    // 只清理录音相关资源，保持WebSocket连接
+    ResourceManager.cleanupAudioStream();
+    ResourceManager.cleanupAudioProcessor();
+    ResourceManager.cleanupAudioContext();
+
+    console.log('✅ 录音已停止，WebSocket连接保持');
 }
 
 // ===========================
@@ -1253,10 +1279,10 @@ const MessageHandler = {
                 window.appState.conversationMode.historyCount = data.history_count || 0;
             }
 
-            // 停止音频录制并完全清理连接（一次性对话完成）
+            // 停止音频录制但保持WebSocket连接（一次性对话完成，减少嵌入式设备重连开销）
             if (isStreaming) {
-                stopStreaming();
-                console.log('✅ 一次性对话完成：已停止录制并清理所有连接');
+                stopRecordingKeepConnection();
+                console.log('✅ 一次性对话完成：已停止录制，WebSocket连接保持以便继续对话');
             }
 
             // 显示暂停状态和重新开始按钮
@@ -1652,23 +1678,30 @@ async function restartConversation() {
     });
 
     try {
-        // 准备连接参数，包含保存的用户ID
-        const connectParams = {};
-        if (window.appState && window.appState.savedUserId) {
-            connectParams.saved_user_id = window.appState.savedUserId;
-            console.log('连接参数包含保存的用户ID:', window.appState.savedUserId);
+        // 检查WebSocket连接是否仍然有效
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+            console.log('✅ WebSocket连接仍然有效，直接发送重新开始消息');
+        } else {
+            console.log('❌ WebSocket连接无效，需要重新建立连接');
+            
+            // 准备连接参数，包含保存的用户ID
+            const connectParams = {};
+            if (window.appState && window.appState.savedUserId) {
+                connectParams.saved_user_id = window.appState.savedUserId;
+                console.log('连接参数包含保存的用户ID:', window.appState.savedUserId);
+            }
+
+            // 重新建立WebSocket连接
+            websocket = await WebSocketManager.connect(
+                CONSTANTS.WS_ENDPOINTS.STREAM,
+                handleWebSocketMessage,
+                connectParams
+            );
+
+            console.log('WebSocket重新连接成功');
         }
 
-        // 重新建立WebSocket连接
-        websocket = await WebSocketManager.connect(
-            CONSTANTS.WS_ENDPOINTS.STREAM,
-            handleWebSocketMessage,
-            connectParams
-        );
-
-        console.log('WebSocket重新连接成功');
-
-        // 连接成功后，发送重新开始消息（用户ID已通过URL参数传递）
+        // 发送重新开始消息（用户ID已通过URL参数传递或现有连接维持）
         const restartMessage = {
             type: 'restart_conversation'
         };
