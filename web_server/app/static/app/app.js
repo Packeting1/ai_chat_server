@@ -528,12 +528,17 @@ const WebSocketManager = {
                 clearTimeout(connectTimeout);
                 console.log('WebSocket连接已关闭:', event.code, event.reason);
 
-                if (isStreaming && event.code !== 1000) {
+                // 检查是否需要重连：正在流式传输或需要保持连接
+                const shouldReconnect = (isStreaming || window.keepConnectionAlive) && event.code !== 1000;
+                
+                if (shouldReconnect) {
                     // 非正常关闭，尝试重连
+                    console.log('🔄 检测到连接断开，尝试重连... isStreaming:', isStreaming, 'keepConnectionAlive:', window.keepConnectionAlive);
                     connectionManager.attemptReconnect(endpoint, onMessage)
                         .then(newWs => {
                             if (newWs) {
                                 websocket = newWs;
+                                console.log('✅ WebSocket重连成功');
                             }
                         });
                 } else if (isStreaming) {
@@ -541,6 +546,8 @@ const WebSocketManager = {
                         status: getLangText('connectionClosed')
                     });
                     stopStreaming();
+                } else if (window.keepConnectionAlive) {
+                    console.log('⚠️ WebSocket正常关闭，但保持连接标志仍然激活');
                 }
             };
         });
@@ -1015,6 +1022,9 @@ function stopStreaming() {
     // 更新状态
     isStreaming = false;
     conversationCount = 0;
+    
+    // 清除保持连接标志，因为这是用户主动停止
+    window.keepConnectionAlive = false;
 
     // 重置按钮到默认状态
     resetButtonToDefault();
@@ -1036,9 +1046,12 @@ function stopStreaming() {
  * 停止录音但保持WebSocket连接（用于一次性对话模式）
  */
 function stopRecordingKeepConnection() {
-    // 更新状态
+    // 更新录音状态但保持连接监控
     isStreaming = false;
     conversationCount = 0;
+    
+    // 设置标志表示需要保持连接以便后续重连
+    window.keepConnectionAlive = true;
 
     // 重置按钮到默认状态
     resetButtonToDefault();
@@ -1055,7 +1068,7 @@ function stopRecordingKeepConnection() {
     ResourceManager.cleanupAudioProcessor();
     ResourceManager.cleanupAudioContext();
 
-    console.log('✅ 录音已停止，WebSocket连接保持');
+    console.log('✅ 录音已停止，WebSocket连接保持，重连监控激活');
 }
 
 // ===========================
@@ -1709,6 +1722,9 @@ async function restartConversation() {
         // 发送重新开始消息到服务器
         if (WebSocketManager.safeSend(websocket, JSON.stringify(restartMessage))) {
             console.log('已发送继续对话请求到服务器');
+            
+            // 清除保持连接标志，因为现在要重新开始对话
+            window.keepConnectionAlive = false;
 
             // 更新UI状态
             DOMUtils.updateTexts({
