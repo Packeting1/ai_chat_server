@@ -82,6 +82,13 @@ class FunASRConnectionPool:
                     conn.last_used = time.time()
                     self.user_connections[user_id] = conn
 
+                    # 复用空闲连接时，重新下发本会话的流配置，确保状态一致
+                    try:
+                        stream_cfg = await create_stream_config_async()
+                        await conn.client.send_config(stream_cfg)
+                    except Exception as e:
+                        logger.error(f"复用连接下发配置失败: {e}")
+
                     return conn.client
 
             # 如果没有空闲连接且未达到最大连接数，创建新连接
