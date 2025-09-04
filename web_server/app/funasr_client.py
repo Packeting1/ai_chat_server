@@ -59,8 +59,8 @@ class FunASRClient:
             self.websocket = await websockets.connect(
                 self.uri,
                 ssl=ssl_context,
-                ping_interval=30,  # 30秒ping间隔
-                ping_timeout=10,  # 10秒ping超时
+                ping_interval=15,  # 更频繁的ping，降低中间设备闲置断开概率
+                ping_timeout=30,  # 更宽松的超时，避免误判
                 close_timeout=10,  # 10秒关闭超时
             )
 
@@ -191,8 +191,7 @@ class FunASRClient:
             return None
         except Exception as e:
             logger.error(f"接收消息错误: {e}")
-            # 发生其他错误也标记连接为无效
-            self.websocket = None
+            # 非 ConnectionClosed 的异常，暂不判定连接失效，返回 None 由上层重试
             return None
 
     async def recognize_audio(
@@ -323,14 +322,6 @@ class FunASRClient:
     def is_connected(self) -> bool:
         """检查是否已连接"""
         if self.websocket is None:
-            return False
-
-        # 检查连接时间是否过长（超过1小时）
-        current_time = asyncio.get_event_loop().time()
-        if (
-            self.connection_created_at > 0
-            and (current_time - self.connection_created_at) > 3600
-        ):
             return False
 
         # 安全检查连接状态
