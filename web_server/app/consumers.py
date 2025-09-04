@@ -1,4 +1,5 @@
 import asyncio
+import secrets
 import base64
 import json
 import logging
@@ -20,6 +21,9 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 断开后的延迟清理令牌，防止误删重连后的会话
+_pending_cleanup_tokens: dict[str, str] = {}
 
 
 class StreamChatConsumer(AsyncWebsocketConsumer):
@@ -85,6 +89,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
         # 连接到FunASR服务
         await self.connect_funasr()
+        # 注册清理令牌，标记此连接为最新活跃者
+        self._cleanup_token = secrets.token_hex(8)
+        _pending_cleanup_tokens[self.user_id] = self._cleanup_token
+
 
         # 发送当前对话模式信息
         await self.handle_get_conversation_mode()
@@ -147,9 +155,37 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"清理用户 {self.user_id} TTS状态失败: {e}")
 
-        # 清理用户会话（但一次性对话的强制断开不删除session，以便后续继续对话）
-        if not getattr(self, "is_one_time_disconnect", False):
-            await session_manager.remove_session(self.user_id)
+        # 延迟5秒后清理会话与残留状态；若期间用户重连，会刷新令牌，旧任务将退出
+        try:
+            token = secrets.token_hex(8)
+            _pending_cleanup_tokens[self.user_id] = token
+
+            async def delayed_cleanup(user_id: str, expected_token: str):
+                try:
+                    await asyncio.sleep(5)
+                    # 若用户已在5秒内重连，令牌会被刷新，不应清理
+                    if _pending_cleanup_tokens.get(user_id) != expected_token:
+                        return
+
+                    # 双保险：释放ASR/TTS与会话
+                    try:
+                        config = await get_system_config_async()
+                        if config.use_connection_pool:
+                            pool = await get_connection_pool()
+                            await pool.release_connection(user_id)
+                    except Exception:
+                        pass
+
+                    # 这里只释放运行态资源（ASR/TTS等），不触碰会话数据
+                finally:
+                    # 清理令牌
+                    if _pending_cleanup_tokens.get(user_id) == expected_token:
+                        _pending_cleanup_tokens.pop(user_id, None)
+
+            asyncio.create_task(delayed_cleanup(self.user_id, token))
+        except Exception:
+            # 兜底：仅忽略错误，不删除会话数据
+            pass
 
         raise StopConsumer()
 
