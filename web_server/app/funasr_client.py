@@ -38,6 +38,8 @@ class FunASRClient:
         self.last_ping_time = 0
         self.ping_interval = 30  # 30秒发送一次ping
         self.connection_created_at = 0
+        # 添加recv锁，防止多个协程同时调用recv
+        self._recv_lock = asyncio.Lock()
 
     async def connect(self):
         """连接到FunASR服务器"""
@@ -152,7 +154,7 @@ class FunASRClient:
             raise
 
     async def receive_message(self, timeout: float = 10.0) -> dict[str, Any] | None:
-        """接收消息"""
+        """接收消息（带锁保护，防止并发访问）"""
         if not self.websocket:
             return None
 
@@ -164,35 +166,46 @@ class FunASRClient:
             # 某些websockets版本没有closed属性，忽略检查
             pass
 
-        try:
-            # 使用asyncio.wait_for设置超时
-            message = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
-
-            # 处理二进制消息
-            if isinstance(message, bytes):
-                return None
-
-            # 处理文本消息
+        # 使用锁保护recv操作，防止多个协程同时调用
+        async with self._recv_lock:
             try:
-                data = json.loads(message)
+                # 再次检查连接状态（在锁内检查，避免竞态条件）
+                if not self.websocket:
+                    return None
+                
+                try:
+                    if hasattr(self.websocket, "closed") and self.websocket.closed:
+                        return None
+                except AttributeError:
+                    pass
 
-                return data
-            except json.JSONDecodeError:
-                logger.warning(f"无法解析JSON消息: {message}")
+                # 使用asyncio.wait_for设置超时
+                message = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
+
+                # 处理二进制消息
+                if isinstance(message, bytes):
+                    return None
+
+                # 处理文本消息
+                try:
+                    data = json.loads(message)
+                    return data
+                except json.JSONDecodeError:
+                    logger.warning(f"无法解析JSON消息: {message}")
+                    return None
+
+            except asyncio.TimeoutError:
+                # 超时是正常的，不记录错误
                 return None
-
-        except asyncio.TimeoutError:
-            # 超时是正常的，不记录错误
-            return None
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("FunASR连接已关闭")
-            # 标记连接为无效
-            self.websocket = None
-            return None
-        except Exception as e:
-            logger.error(f"接收消息错误: {e}")
-            # 非 ConnectionClosed 的异常，暂不判定连接失效，返回 None 由上层重试
-            return None
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("FunASR连接已关闭")
+                # 标记连接为无效
+                self.websocket = None
+                return None
+            except Exception as e:
+                logger.error(f"接收消息错误: {e}")
+                # 非 ConnectionClosed 的异常，暂不判定连接失效，返回 None 由上层重试
+                return None
 
     async def recognize_audio(
         self, pcm_data: bytes, sample_rate: int = 16000, progress_callback=None

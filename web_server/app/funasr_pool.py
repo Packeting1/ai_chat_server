@@ -74,7 +74,22 @@ class FunASRConnectionPool:
                     # 连接已断开，移除映射
                     await self._remove_user_connection(user_id)
 
-            # 寻找空闲连接
+            # 优先为每个用户创建独立连接，避免连接复用导致的并发问题
+            if len(self.connections) < self.max_connections:
+                try:
+                    conn = await self._create_connection()
+                    conn.in_use = True
+                    conn.user_id = user_id
+                    conn.last_used = time.time()
+                    self.connections.append(conn)
+                    self.user_connections[user_id] = conn
+
+                    logger.info(f"为用户 {user_id} 创建新的独立连接")
+                    return conn.client
+                except Exception as e:
+                    logger.error(f"创建新连接失败: {e}")
+
+            # 如果连接池已满，尝试寻找空闲连接（但这是最后的选择）
             for conn in self.connections:
                 if not conn.in_use and conn.client.is_connected():
                     conn.in_use = True
@@ -86,26 +101,13 @@ class FunASRConnectionPool:
                     try:
                         stream_cfg = await create_stream_config_async()
                         await conn.client.send_config(stream_cfg)
+                        logger.warning(f"为用户 {user_id} 复用现有连接（连接池已满）")
                     except Exception as e:
                         logger.error(f"复用连接下发配置失败: {e}")
 
                     return conn.client
 
-            # 如果没有空闲连接且未达到最大连接数，创建新连接
-            if len(self.connections) < self.max_connections:
-                try:
-                    conn = await self._create_connection()
-                    conn.in_use = True
-                    conn.user_id = user_id
-                    conn.last_used = time.time()
-                    self.connections.append(conn)
-                    self.user_connections[user_id] = conn
-
-                    return conn.client
-                except Exception as e:
-                    logger.error(f"创建新连接失败: {e}")
-
-            # 连接池已满，返回None
+            # 连接池已满且无空闲连接，返回None
             logger.warning(f"连接池已满，无法为用户 {user_id} 分配连接")
             return None
 

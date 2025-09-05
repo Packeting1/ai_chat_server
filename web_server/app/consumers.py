@@ -950,7 +950,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"初始化TTS连接池失败: {e}")
 
     async def connection_health_check(self):
-        """连接健康检查任务"""
+        """连接健康检查任务（避免与响应处理任务冲突）"""
         while self.is_running:
             try:
                 await asyncio.sleep(5)  # 每5秒检查一次，提高检查频率
@@ -958,7 +958,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 if not self.is_running:
                     break
 
-                # 检查FunASR连接状态
+                # 检查FunASR连接状态（不调用recv，只检查连接状态）
                 if self.funasr_client and not self.funasr_client.is_connected():
                     logger.warning(
                         f"🔌 用户 {self.user_id} FunASR连接已断开，尝试重连..."
