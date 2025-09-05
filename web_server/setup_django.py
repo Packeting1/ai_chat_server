@@ -12,10 +12,10 @@ def setup_django():
 def run_migrations():
     """运行数据库迁移"""
     print("🔨 正在创建数据库迁移...")
-    execute_from_command_line(["manage.py", "makemigrations"])
+    execute_from_command_line(["manage.py", "makemigrations", "--noinput"])
 
     print("📊 正在应用数据库迁移...")
-    execute_from_command_line(["manage.py", "migrate"])
+    execute_from_command_line(["manage.py", "migrate", "--noinput"])
 
 
 def create_superuser():
