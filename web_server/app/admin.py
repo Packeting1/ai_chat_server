@@ -8,8 +8,6 @@ class SystemConfigAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "llm_model",
-        "use_connection_pool",
-        "pool_max_connections",
         "tts_enabled",
         "tts_use_connection_pool",
         "updated_at",
