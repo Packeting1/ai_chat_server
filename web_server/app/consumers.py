@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import time
+import uuid
 
 from channels.exceptions import StopConsumer
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -239,13 +240,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         # 释放当前连接
                         if self.funasr_client:
                             try:
-                                config = await get_system_config_async()
-
-                                if config.use_connection_pool:
-                                    pool = await get_connection_pool()
-                                    await pool.release_connection(self.user_id)
-                                else:
-                                    await self.funasr_client.disconnect()
+                                await self.funasr_client.disconnect()
                             except Exception as e:
                                 logger.error(f"释放连接失败: {e}")
 
@@ -1006,6 +1001,8 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         self, text: str, detected_language: str = None, tts_voice: str = None
     ):
         """处理TTS语音合成"""
+        current_tts_id = str(uuid.uuid4())
+
         try:
             # 检查TTS是否启用
             config = await SystemConfig.objects.aget(pk=1)
@@ -1034,6 +1031,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 text_data=json.dumps(
                     {
                         "type": "tts_start",
+                        "tts_id": current_tts_id,
                         "message": "开始语音合成...",
                         "sample_rate": sample_rate,
                         "format": "pcm",
@@ -1081,6 +1079,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                 text_data=json.dumps(
                                     {
                                         "type": "tts_audio",
+                                        "tts_id": current_tts_id,
                                         "audio_data": audio_b64,
                                         "audio_size": len(audio_b64),
                                     }
@@ -1162,6 +1161,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         text_data=json.dumps(
                             {
                                 "type": "tts_audio",
+                                "tts_id": current_tts_id,
                                 "audio_data": audio_b64,
                                 "audio_size": len(audio_b64),
                                 "is_final": True,
