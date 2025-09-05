@@ -9,7 +9,6 @@ from django.views.decorators.http import require_http_methods
 
 from .audio_processor import get_audio_info, process_audio_data
 from .funasr_client import FunASRClient
-from .funasr_pool import get_connection_pool
 from .llm_client import call_llm_simple
 from .utils import get_system_config_async, session_manager
 
@@ -130,25 +129,4 @@ def cleanup_users(request):
         return JsonResponse({"success": False, "error": "无效的JSON数据"}, status=400)
     except Exception as e:
         logger.error(f"清理用户失败: {e}")
-        return JsonResponse({"success": False, "error": str(e)}, status=500)
-
-
-@require_http_methods(["GET"])
-def get_connection_pool_stats(request):
-    """获取FunASR连接池状态"""
-
-    async def get_stats():
-        try:
-            pool = await get_connection_pool()
-            stats = pool.get_stats()
-            return {"success": True, "stats": stats, "message": "连接池状态获取成功"}
-        except Exception as e:
-            logger.error(f"获取连接池状态失败: {e}")
-            return {"success": False, "error": str(e)}
-
-    try:
-        result = async_to_sync(get_stats)()
-        return JsonResponse(result)
-    except Exception as e:
-        logger.error(f"连接池状态API错误: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)

@@ -67,18 +67,6 @@ class SystemConfigAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "FunASR连接池配置",
-            {
-                "fields": (
-                    "use_connection_pool",
-                    "pool_min_connections",
-                    "pool_max_connections",
-                    "pool_max_idle_time",
-                ),
-                "description": "连接池模式可以减少资源消耗，适合多用户场景。独立连接模式适合调试和小规模使用。",
-            },
-        ),
-        (
             "DashScope TTS基础配置",
             {
                 "fields": (

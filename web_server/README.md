@@ -18,7 +18,7 @@
 
 ### API类型
 - 🎤 **实时语音识别**：WebSocket流式API，支持实时对话
-- 🔊 **TTS语音合成**：实时文本转语音，支持连接池和智能中断
+- 🔊 **TTS语音合成**：实时文本转语音，支持智能中断
 - 📁 **文件上传识别**：WebSocket/HTTP API，支持音频文件识别
 - 🤖 **智能对话**：集成LLM，提供上下文对话能力
 - 🔄 **对话模式**：支持持续对话和一次性对话两种交互模式
@@ -32,7 +32,7 @@
 - **HTTP API端点**：
   - `/api/recognize` - 文件识别
   - `/api/config` - 配置管理
-  - `/api/pool/stats` - 连接池统计
+  - `/api/config` - 配置管理
   - `/api/cleanup` - 用户清理
 - **额外信息**:
   - Web客户端：`http://your-server.com:port`
@@ -96,19 +96,17 @@ wss://your-server.com:port/ws/stream
 }
 ```
 
-##### ASR连接成功（连接池模式）
+##### ASR连接成功（独立连接模式）
 ```json
 {
     "type": "asr_connected",           // 消息类型
-    "message": "ASR服务器连接成功（连接池模式）", // 状态描述
-    "connection_mode": "pool",         // 连接模式: "pool" | "independent"
-    "pool_stats": {                    // 连接池统计信息
-        "total_connections": 10,        // 总连接数
-        "active_connections": 3,        // 活跃连接数
-        "idle_connections": 7,          // 空闲连接数
-        "active_users": 5,              // 活跃用户数
-        "max_connections": 10,          // 最大连接数
-        "min_connections": 2            // 最小连接数
+    "message": "ASR服务器连接成功（独立连接模式）", // 状态描述
+    "connection_mode": "independent",  // 连接模式
+    "config": {                        // FunASR配置信息
+        "mode": "2pass",               // 识别模式
+        "chunk_size": [5, 10, 5],      // 块大小配置
+        "audio_fs": 16000,             // 音频采样率
+        "wav_format": "pcm"            // 音频格式
     }
 }
 ```
@@ -453,7 +451,7 @@ async function startRecording(websocket) {
 ## 🔊 TTS语音合成功能
 
 ### 功能概述
-TTS语音合成功能为AI回答提供实时语音播放，支持连接池模式和多种音频参数配置。
+TTS语音合成功能为AI回答提供实时语音播放，支持多种音频参数配置。
 
 ### TTS相关消息类型
 
@@ -969,26 +967,24 @@ POST /api/cleanup/
 }
 ```
 
-### 4. 连接池状态API
+### 4. 系统配置API
 
 #### 接口地址
 ```
-GET /api/pool/stats/
+GET /api/config/
 ```
 
 #### 响应格式
 ```json
 {
     "success": true,                   // 操作是否成功
-    "stats": {                         // 连接池统计
-        "total_connections": 10,       // 总连接数
-        "active_connections": 3,       // 活跃连接数
-        "idle_connections": 7,         // 空闲连接数
-        "active_users": 5,             // 活跃用户数
-        "max_connections": 10,         // 最大连接数
-        "min_connections": 2           // 最小连接数
+    "config": {                        // 系统配置
+        "funasr_host": "localhost",    // FunASR服务器地址
+        "funasr_port": 10095,          // FunASR服务器端口
+        "continuous_conversation": true, // 是否启用持续对话模式
+        "max_conversation_history": 5   // 最大对话历史数量
     },
-    "message": "连接池状态获取成功"     // 状态描述
+    "message": "配置获取成功"          // 状态描述
 }
 ```
 
@@ -996,7 +992,7 @@ GET /api/pool/stats/
 ```json
 {
     "success": false,                  // 操作失败
-    "error": "获取连接池状态失败: [具体错误]" // 错误描述
+    "error": "获取配置失败: [具体错误]" // 错误描述
 }
 ```
 

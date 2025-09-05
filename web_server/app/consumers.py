@@ -10,7 +10,6 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 
 from .audio_processor import get_audio_info, process_audio_data
 from .funasr_client import FunASRClient, create_stream_config_async
-from .funasr_pool import get_connection_pool
 from .llm_client import call_llm_stream, filter_think_tags
 from .models import SystemConfig
 from .tts_pool import get_tts_pool, interrupt_user_tts, tts_speak_stream
@@ -128,18 +127,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             except asyncio.CancelledError:
                 pass
 
-        # 根据配置决定如何处理连接
+        # 断开FunASR连接（独立连接模式）
         if self.funasr_client:
             try:
-                config = await get_system_config_async()
-
-                if config.use_connection_pool:
-                    # 连接池模式：释放连接
-                    pool = await get_connection_pool()
-                    await pool.release_connection(self.user_id)
-                else:
-                    # 独立连接模式：直接断开
-                    await self.funasr_client.disconnect()
+                await self.funasr_client.disconnect()
             except Exception as e:
                 logger.error(f"处理FunASR连接断开失败: {e}")
 
@@ -167,14 +158,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     if _pending_cleanup_tokens.get(user_id) != expected_token:
                         return
 
-                    # 双保险：释放ASR/TTS与会话
-                    try:
-                        config = await get_system_config_async()
-                        if config.use_connection_pool:
-                            pool = await get_connection_pool()
-                            await pool.release_connection(user_id)
-                    except Exception:
-                        pass
+                    # 双保险：清理ASR/TTS资源（独立连接模式）
 
                     # 这里只释放运行态资源（ASR/TTS等），不触碰会话数据
                 finally:
@@ -190,51 +174,27 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         raise StopConsumer()
 
     async def connect_funasr(self):
-        """连接到FunASR服务（支持连接池和独立连接模式）"""
+        """连接到FunASR服务（独立连接模式）"""
         try:
-            # 获取配置，决定使用连接池还是独立连接
-            config = await get_system_config_async()
+            # 独立连接模式 - 每个用户一个独立的ASR连接
+            self.funasr_client = FunASRClient()
+            await self.funasr_client.connect()
 
-            if config.use_connection_pool:
-                # 连接池模式
-                pool = await get_connection_pool()
-                self.funasr_client = await pool.get_connection(self.user_id)
+            # 发送初始配置
+            stream_config = await create_stream_config_async()
+            await self.funasr_client.send_config(stream_config)
 
-                if self.funasr_client is None:
-                    raise Exception("连接池已满，无法获取FunASR连接")
-
-                # 发送ASR连接成功通知到前端
-                pool_stats = pool.get_stats()
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "asr_connected",
-                            "message": "ASR服务器连接成功（连接池模式）",
-                            "connection_mode": "pool",
-                            "pool_stats": pool_stats,
-                        }
-                    )
+            # 发送ASR连接成功通知到前端
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "asr_connected",
+                        "message": "ASR服务器连接成功（独立连接模式）",
+                        "connection_mode": "independent",
+                        "config": stream_config,
+                    }
                 )
-            else:
-                # 独立连接模式
-                self.funasr_client = FunASRClient()
-                await self.funasr_client.connect()
-
-                # 发送初始配置
-                stream_config = await create_stream_config_async()
-                await self.funasr_client.send_config(stream_config)
-
-                # 发送ASR连接成功通知到前端
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "asr_connected",
-                            "message": "ASR服务器连接成功（独立连接模式）",
-                            "connection_mode": "independent",
-                            "config": stream_config,
-                        }
-                    )
-                )
+            )
 
             self.asr_connected = True
 

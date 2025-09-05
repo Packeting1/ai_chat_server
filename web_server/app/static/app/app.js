@@ -1606,8 +1606,6 @@ function updateUserInfo(userId, activeUsers) {
             $userInfo.text(`👤 User: ${shortId} | 🌐 Online: ${activeUsers}`);
         }
 
-        // 从连接池获取准确的在线人数
-        fetchAccurateOnlineUsers();
     } else {
         if (currentLanguage === 'zh') {
             $userInfo.text('👤 用户: 未连接 | 🌐 在线: 0人');
@@ -1615,50 +1613,6 @@ function updateUserInfo(userId, activeUsers) {
             $userInfo.text('👤 User: Disconnected | 🌐 Online: 0');
         }
     }
-}
-
-/**
- * 从连接池API获取准确的在线人数
- */
-async function fetchAccurateOnlineUsers() {
-    try {
-        const response = await $.getJSON('/api/pool/stats/');
-        if (response.success && response.stats) {
-            const activeUsers = response.stats.active_users || 0;
-
-            // 更新用户信息显示，保持用户ID不变
-            const $userInfo = $('#userInfo');
-            const currentText = $userInfo.text();
-            const userPart = currentText.split(' | ')[0]; // 保留用户部分
-
-            if (currentLanguage === 'zh') {
-                $userInfo.text(`${userPart} | 🌐 在线: ${activeUsers}人`);
-                console.log(`从连接池获取准确在线人数: ${activeUsers}`);
-            } else {
-                $userInfo.text(`${userPart} | 🌐 Online: ${activeUsers}`);
-                console.log(`Fetched accurate online users from pool: ${activeUsers}`);
-            }
-        }
-    } catch (error) {
-        if (currentLanguage === 'zh') {
-            console.warn('获取连接池状态失败:', error);
-        } else {
-            console.warn('Failed to fetch pool stats:', error);
-        }
-        // 如果获取失败，不影响现有显示
-    }
-}
-
-/**
- * 定期更新在线人数
- */
-function startOnlineUsersUpdater() {
-    // 每30秒更新一次在线人数
-    setInterval(() => {
-        if (window.appState && window.appState.savedUserId) { // 只有在连接状态下才更新
-            fetchAccurateOnlineUsers();
-        }
-    }, 30000);
 }
 
 function resetConversation() {
@@ -2635,9 +2589,6 @@ $(document).ready(async function() {
     // 初始化UI状态
     updateMemoryStatus();
     updateUserInfo(null, 0);
-
-    // 启动在线用户数更新器
-    startOnlineUsersUpdater();
 
     // 添加CSS动画
     $('<style>').text(`

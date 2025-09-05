@@ -56,20 +56,6 @@ class SystemConfig(models.Model):
     funasr_ssl = models.BooleanField(default=False, verbose_name="使用SSL")
     funasr_ssl_verify = models.BooleanField(default=False, verbose_name="验证SSL证书")
 
-    # FunASR连接池配置
-    use_connection_pool = models.BooleanField(
-        default=True, verbose_name="使用FunASR连接池模式"
-    )
-    pool_min_connections = models.IntegerField(
-        default=2, verbose_name="连接池最小连接数"
-    )
-    pool_max_connections = models.IntegerField(
-        default=20, verbose_name="连接池最大连接数"
-    )
-    pool_max_idle_time = models.IntegerField(
-        default=300, verbose_name="连接最大空闲时间（秒）"
-    )
-
     # 用户会话配置
     session_cleanup_hours = models.IntegerField(
         default=1, verbose_name="清理非活跃用户的小时数"
