@@ -100,6 +100,37 @@ def clean_recognition_text(text: str) -> str:
     return cleaned_text
 
 
+def add_language_tag_to_text(text: str, detected_language: str) -> str:
+    """
+    为文本添加语言标签，让LLM知道用户使用的语言
+    
+    Args:
+        text: 原始文本
+        detected_language: 检测到的语言代码
+        
+    Returns:
+        添加了语言标签的文本
+    """
+    if not text or not detected_language:
+        return text
+    
+    # 语言代码到语言名称的映射
+    language_names = {
+        "zh": "Chinese",
+        "yue": "Cantonese", 
+        "en": "English",
+        "ja": "Japanese",
+        "ko": "Korean",
+    }
+    
+    language_name = language_names.get(detected_language, detected_language)
+    
+    # 在文本前添加语言标签
+    tagged_text = f"[User Language: {language_name}] {text}"
+    
+    return tagged_text
+
+
 def process_recognition_result(raw_text: str, config) -> dict:
     """
     处理ASR识别结果，提取语言信息和清理文本

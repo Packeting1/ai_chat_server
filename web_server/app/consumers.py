@@ -17,6 +17,7 @@ from .tts_pool import get_tts_pool, interrupt_user_tts, tts_speak_stream
 from .utils import (
     get_system_config_async,
     process_recognition_result,
+    add_language_tag_to_text,
     session_manager,
 )
 
@@ -576,13 +577,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # 获取系统配置，决定是否启用think标签过滤
             config = await get_system_config_async()
 
+            # 为LLM调用添加语言标签
+            tagged_user_input = add_language_tag_to_text(user_input, self.detected_language)
+            
             # 流式调用LLM - 使用跳过方式的实时处理
             full_response = ""
             in_think_block = False
             is_start_output = True  # flag: 是否还在开头输出状态
             pending_content = ""  # 暂存可能需要跳过的内容
 
-            async for chunk in call_llm_stream(user_input, conversation_history):
+            async for chunk in call_llm_stream(tagged_user_input, conversation_history):
                 # 检查多个状态，确保任务应该继续执行
                 if not self.is_running or not self.conversation_active:
                     logger.info(
@@ -1484,6 +1488,13 @@ class UploadConsumer(AsyncWebsocketConsumer):
                 try:
                     # 获取系统配置，决定是否启用think标签过滤
                     config = await get_system_config_async()
+                    
+                    # 处理识别结果，获取语言信息
+                    result = process_recognition_result(accumulated_text.strip(), config)
+                    detected_language = result["detected_language"]
+                    
+                    # 为LLM调用添加语言标签
+                    tagged_text = add_language_tag_to_text(accumulated_text.strip(), detected_language)
 
                     llm_response = ""
                     chunk_count = 0
@@ -1491,7 +1502,7 @@ class UploadConsumer(AsyncWebsocketConsumer):
                     in_think_block = False
                     pending_content = ""
 
-                    async for chunk in call_llm_stream(accumulated_text.strip(), []):
+                    async for chunk in call_llm_stream(tagged_text, []):
                         chunk_count += 1
 
                         if chunk:
@@ -1732,8 +1743,16 @@ class UploadConsumer(AsyncWebsocketConsumer):
 
                 # 调用LLM
                 from .llm_client import call_llm_simple
+                
+                # 处理识别结果，获取语言信息
+                config = await get_system_config_async()
+                result = process_recognition_result(recognized_text, config)
+                detected_language = result["detected_language"]
+                
+                # 为LLM调用添加语言标签
+                tagged_text = add_language_tag_to_text(recognized_text, detected_language)
 
-                llm_response = await call_llm_simple(recognized_text, [])
+                llm_response = await call_llm_simple(tagged_text, [])
 
                 await self.send(
                     text_data=json.dumps(

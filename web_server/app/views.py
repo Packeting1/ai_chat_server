@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 from .audio_processor import get_audio_info, process_audio_data
 from .funasr_client import FunASRClient
 from .llm_client import call_llm_simple
-from .utils import get_system_config_async, session_manager
+from .utils import process_recognition_result, add_language_tag_to_text, get_system_config_async, session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,15 @@ def recognize_audio_api(request):
             # 调用LLM（传统模式不保存历史记录）
             llm_response = ""
             if recognized_text:
-                llm_response = await call_llm_simple(recognized_text, [])
+                # 处理识别结果，获取语言信息
+                config = await get_system_config_async()
+                result = process_recognition_result(recognized_text, config)
+                detected_language = result["detected_language"]
+                
+                # 为LLM调用添加语言标签
+                tagged_text = add_language_tag_to_text(recognized_text, detected_language)
+                
+                llm_response = await call_llm_simple(tagged_text, [])
 
             return {
                 "success": True,
