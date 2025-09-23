@@ -1183,14 +1183,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     )
 
             if success:
-                # 计算实际音频时长
-                actual_duration_seconds = 0
+                # 计算实际音频时长（毫秒）
+                actual_duration_ms = 0
                 if total_audio_bytes > 0:
-                    # 根据PCM格式计算时长: 时长 = 字节数 / (采样率 × 每样本字节数 × 声道数)
-                    actual_duration_seconds = total_audio_bytes / (sample_rate * bytes_per_sample * channels)
+                    # 根据PCM格式计算时长: 时长 = 字节数 / (采样率 × 每样本字节数 × 声道数) × 1000
+                    actual_duration_ms = (total_audio_bytes / (sample_rate * bytes_per_sample * channels)) * 1000
                 
-                # 计算处理耗时
-                processing_time = time.time() - start_time
+                # 计算处理耗时（毫秒）
+                processing_time_ms = (time.time() - start_time) * 1000
                 
                 # 先发送AI完成通知
                 await self.send(
@@ -1209,8 +1209,8 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             "type": "tts_complete", 
                             "message": "语音合成完成",
                             "tts_id": current_tts_id,
-                            "duration_seconds": round(actual_duration_seconds, 2),
-                            "processing_time_seconds": round(processing_time, 2),
+                            "duration_ms": round(actual_duration_ms),
+                            "processing_time_ms": round(processing_time_ms),
                             "total_audio_bytes": total_audio_bytes,
                         }
                     )
@@ -1223,7 +1223,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
             else:
                 # TTS失败时也计算相关信息
-                processing_time = time.time() - start_time
+                processing_time_ms = (time.time() - start_time) * 1000
                 
                 # TTS失败时发送错误通知并确保状态恢复
                 await self.send(
@@ -1232,7 +1232,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             "type": "tts_error", 
                             "error": "语音合成失败，但对话可以继续",
                             "tts_id": current_tts_id,
-                            "processing_time_seconds": round(processing_time, 2),
+                            "processing_time_ms": round(processing_time_ms),
                         }
                     )
                 )
@@ -1266,7 +1266,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"📜 TTS异常堆栈:\n{traceback.format_exc()}")
 
             # TTS异常时也计算处理时间
-            processing_time = time.time() - start_time if 'start_time' in locals() else 0
+            processing_time_ms = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
             
             # TTS异常时确保前端状态恢复
             await self.send(
@@ -1275,7 +1275,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         "type": "tts_error",
                         "error": f"语音合成异常: {str(e)}，但对话可以继续",
                         "tts_id": current_tts_id,
-                        "processing_time_seconds": round(processing_time, 2),
+                        "processing_time_ms": round(processing_time_ms),
                     }
                 )
             )
