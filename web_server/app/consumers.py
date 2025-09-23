@@ -1029,7 +1029,13 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
             # 获取采样率配置
             sample_rate = config.tts_sample_rate
-
+            
+            # 音频时长跟踪变量
+            total_audio_bytes = 0
+            start_time = time.time()
+            bytes_per_sample = 2  # 16-bit PCM
+            channels = 1  # 单声道
+            
             # 发送TTS开始通知
             await self.send(
                 text_data=json.dumps(
@@ -1107,12 +1113,15 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
             # 音频数据回调函数
             def on_audio_data(audio_data):
-                nonlocal pending_bytes, last_send_time
+                nonlocal pending_bytes, last_send_time, total_audio_bytes
                 try:
                     # 基本验证
                     if not audio_data or len(audio_data) == 0:
                         logger.warning(f"⚠️ 收到空音频数据，用户: {self.user_id}")
                         return
+
+                    # 累计音频字节数用于时长计算
+                    total_audio_bytes += len(audio_data)
 
                     # 追加到字节缓冲
                     pending_bytes.extend(audio_data)
@@ -1174,6 +1183,15 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     )
 
             if success:
+                # 计算实际音频时长
+                actual_duration_seconds = 0
+                if total_audio_bytes > 0:
+                    # 根据PCM格式计算时长: 时长 = 字节数 / (采样率 × 每样本字节数 × 声道数)
+                    actual_duration_seconds = total_audio_bytes / (sample_rate * bytes_per_sample * channels)
+                
+                # 计算处理耗时
+                processing_time = time.time() - start_time
+                
                 # 先发送AI完成通知
                 await self.send(
                     text_data=json.dumps(
@@ -1184,10 +1202,17 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     )
                 )
 
-                # 再发送TTS完成通知
+                # 再发送TTS完成通知，包含时长信息
                 await self.send(
                     text_data=json.dumps(
-                        {"type": "tts_complete", "message": "语音合成完成"}
+                        {
+                            "type": "tts_complete", 
+                            "message": "语音合成完成",
+                            "tts_id": current_tts_id,
+                            "duration_seconds": round(actual_duration_seconds, 2),
+                            "processing_time_seconds": round(processing_time, 2),
+                            "total_audio_bytes": total_audio_bytes,
+                        }
                     )
                 )
 
@@ -1197,10 +1222,18 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     await self.send_conversation_paused_message()
 
             else:
+                # TTS失败时也计算相关信息
+                processing_time = time.time() - start_time
+                
                 # TTS失败时发送错误通知并确保状态恢复
                 await self.send(
                     text_data=json.dumps(
-                        {"type": "tts_error", "error": "语音合成失败，但对话可以继续"}
+                        {
+                            "type": "tts_error", 
+                            "error": "语音合成失败，但对话可以继续",
+                            "tts_id": current_tts_id,
+                            "processing_time_seconds": round(processing_time, 2),
+                        }
                     )
                 )
                 logger.error(
@@ -1232,12 +1265,17 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
             logger.error(f"📜 TTS异常堆栈:\n{traceback.format_exc()}")
 
+            # TTS异常时也计算处理时间
+            processing_time = time.time() - start_time if 'start_time' in locals() else 0
+            
             # TTS异常时确保前端状态恢复
             await self.send(
                 text_data=json.dumps(
                     {
                         "type": "tts_error",
                         "error": f"语音合成异常: {str(e)}，但对话可以继续",
+                        "tts_id": current_tts_id,
+                        "processing_time_seconds": round(processing_time, 2),
                     }
                 )
             )
