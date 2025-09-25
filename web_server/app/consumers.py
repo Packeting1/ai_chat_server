@@ -844,6 +844,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         # 等待一小段时间，让可能仍在执行的异步任务有机会检查状态并退出
         await asyncio.sleep(0.1)
         
+        # 检查FunASR响应处理任务状态
+        if self.funasr_task and not self.funasr_task.done():
+            logger.info(f"✅ 用户 {self.user_id} FunASR响应处理任务仍在运行")
+        else:
+            logger.warning(f"⚠️ 用户 {self.user_id} FunASR响应处理任务已停止，可能需要重启")
+        
         logger.info(f"🔄 用户 {self.user_id} 对话重启，token: {self._restart_token[:6]}...")
 
         # 获取当前对话历史数量
