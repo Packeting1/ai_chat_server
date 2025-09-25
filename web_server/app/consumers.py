@@ -432,7 +432,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     # 检查FunASR连接状态
                     if not self._is_funasr_ready():
                         # 自愈式重连而不是退出任务，避免健康检查与此处互相打架
-                        logger.warning(f"用户 {self.user_id} FunASR连接已断开，尝试自愈重连...")
+                        logger.warning(f"🔌 用户 {self.user_id} FunASR连接已断开，尝试自愈重连... (asr_connected={self.asr_connected})")
                         await self.reconnect_funasr()
                         await asyncio.sleep(0.2)
                         continue
@@ -849,6 +849,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             logger.info(f"✅ 用户 {self.user_id} FunASR响应处理任务仍在运行")
         else:
             logger.warning(f"⚠️ 用户 {self.user_id} FunASR响应处理任务已停止，可能需要重启")
+        
+        # 检查FunASR连接状态
+        if self._is_funasr_ready():
+            logger.info(f"✅ 用户 {self.user_id} FunASR连接状态正常")
+        else:
+            logger.warning(f"⚠️ 用户 {self.user_id} FunASR连接状态异常，asr_connected={self.asr_connected}")
+            # 尝试重连FunASR
+            await self.reconnect_funasr()
         
         logger.info(f"🔄 用户 {self.user_id} 对话重启，token: {self._restart_token[:6]}...")
 
