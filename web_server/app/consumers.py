@@ -99,6 +99,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         # 发送当前对话模式信息
         await self.handle_get_conversation_mode()
 
+    def _is_funasr_ready(self) -> bool:
+        """统一的FunASR连接状态检查"""
+        return (
+            self.asr_connected and 
+            self.funasr_client is not None and 
+            self.funasr_client.is_connected()
+        )
+
     async def disconnect(self, close_code):
         self.is_running = False
         self.conversation_active = False  # 立即停止对话活动
@@ -235,23 +243,34 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             try:
                 while retry_count < max_retries:
                     try:
-                        # 停止当前的响应处理任务（如果存在）
+                        # 1. 先停止响应处理任务并等待完成
                         if self.funasr_task and not self.funasr_task.done():
                             self.funasr_task.cancel()
+                            try:
+                                await asyncio.wait_for(self.funasr_task, timeout=2.0)
+                            except (asyncio.CancelledError, asyncio.TimeoutError):
+                                pass  # 任务已取消或超时，继续
+                            self.funasr_task = None
 
-                        # 释放当前连接
+                        # 2. 释放当前连接
                         if self.funasr_client:
                             try:
                                 await self.funasr_client.disconnect()
                             except Exception as e:
                                 logger.error(f"释放连接失败: {e}")
+                            finally:
+                                self.funasr_client = None
 
-                        # 等待一小段时间再重连
-                        await asyncio.sleep(1)
+                        # 3. 重置连接状态
+                        self.asr_connected = False
 
-                        # 重新建立连接
+                        # 4. 等待一小段时间再重连
+                        await asyncio.sleep(min(1 + retry_count * 0.5, 3))
+
+                        # 5. 重新建立连接
                         await self.connect_funasr()
 
+                        logger.info(f"✅ 用户 {self.user_id} FunASR重连成功")
                         return
 
                     except Exception as e:
@@ -306,7 +325,8 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
     async def handle_binary_audio_data(self, audio_data):
         """处理二进制音频数据"""
-        if not self.asr_connected or not self.funasr_client or not self.funasr_client.is_connected():
+        # 统一连接检查：只检查一次，避免重复判断
+        if not self._is_funasr_ready():
             # 在短暂重连窗口内进行缓冲，避免直接丢弃
             if self._pending_audio_bytes < self._pending_audio_max_bytes:
                 self._pending_audio_chunks.append(bytes(audio_data))
@@ -323,12 +343,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             return
 
         try:
-            # 检查连接状态
-            if not self.funasr_client.is_connected():
-                logger.warning(f"🔌 用户 {self.user_id} FunASR连接已断开，尝试重连...")
-                await self.reconnect_funasr()
-                return
-
             # 直接发送二进制音频数据到FunASR
             await self.funasr_client.send_audio_data(audio_data)
 
@@ -355,7 +369,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
     async def handle_audio_data(self, audio_data_b64):
         """处理音频数据"""
-        if not self.asr_connected or not self.funasr_client or not self.funasr_client.is_connected():
+        if not self._is_funasr_ready():
             # 前端Base64路径也进行缓冲
             try:
                 audio_data = base64.b64decode(audio_data_b64)
@@ -374,12 +388,6 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         try:
             # 解码Base64音频数据
             audio_data = base64.b64decode(audio_data_b64)
-
-            # 检查连接状态
-            if not self.funasr_client.is_connected():
-                logger.warning(f"用户 {self.user_id} FunASR连接已断开，尝试重连...")
-                await self.reconnect_funasr()
-                return
 
             # 发送音频数据到FunASR
             await self.funasr_client.send_audio_data(audio_data)
@@ -422,7 +430,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             while self.is_running:
                 try:
                     # 检查FunASR连接状态
-                    if not self.funasr_client or not self.funasr_client.is_connected():
+                    if not self._is_funasr_ready():
                         # 自愈式重连而不是退出任务，避免健康检查与此处互相打架
                         logger.warning(f"用户 {self.user_id} FunASR连接已断开，尝试自愈重连...")
                         await self.reconnect_funasr()
@@ -944,27 +952,22 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 if not self.is_running:
                     break
 
-                # 检查FunASR连接状态（不调用recv，只检查连接状态）
-                if self.funasr_client and not self.funasr_client.is_connected():
+                # 统一检查连接状态，避免重复判断
+                if not self._is_funasr_ready():
                     logger.warning(
-                        f"🔌 用户 {self.user_id} FunASR连接已断开，尝试重连..."
+                        f"🔌 用户 {self.user_id} FunASR连接不可用，尝试重连..."
                     )
-                    self.asr_connected = False
                     await self.reconnect_funasr()
+                    continue
 
-                # 检查任务状态
-                # 仅当已连接时才重启响应处理任务，未连接则先重连
+                # 检查响应处理任务状态
                 if self.funasr_task and self.funasr_task.done():
-                    if self.funasr_client and self.funasr_client.is_connected():
-                        logger.warning(
-                            f"⚠️ 用户 {self.user_id} FunASR响应处理任务已结束，重新启动..."
-                        )
-                        self.funasr_task = asyncio.create_task(
-                            self.handle_funasr_responses()
-                        )
-                    else:
-                        # 未连接，优先重连
-                        await self.reconnect_funasr()
+                    logger.warning(
+                        f"⚠️ 用户 {self.user_id} FunASR响应处理任务已结束，重新启动..."
+                    )
+                    self.funasr_task = asyncio.create_task(
+                        self.handle_funasr_responses()
+                    )
 
                 # 检查连接时间，如果连接时间过长则重新连接
                 if self.funasr_client and hasattr(
