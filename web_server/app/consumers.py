@@ -125,10 +125,13 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
         # 取消所有异步任务
         if self.funasr_task:
+            logger.info(f"🛑 用户 {self.user_id} 正在取消FunASR响应处理任务...")
             self.funasr_task.cancel()
             try:
                 await self.funasr_task
+                logger.info(f"✅ 用户 {self.user_id} FunASR响应处理任务已取消")
             except asyncio.CancelledError:
+                logger.info(f"✅ 用户 {self.user_id} FunASR响应处理任务取消完成")
                 pass
 
         # 取消健康检查任务
@@ -449,6 +452,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     data = await self.funasr_client.receive_message(timeout=1.0)
                     if data is None:
                         loop_count += 1
+                        # 检查是否应该退出（连接断开或任务取消）
+                        if not self.is_running:
+                            logger.info(f"🛑 用户 {self.user_id} is_running=False，退出FunASR响应处理循环")
+                            break
                         if loop_count % 30 == 0:  # 每30秒输出一次状态，减少日志噪音
                             logger.info(f"🔄 用户 {self.user_id} FunASR等待中... (循环{loop_count}次, conversation_active={self.conversation_active})")
                         continue
