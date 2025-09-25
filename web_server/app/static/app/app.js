@@ -1949,19 +1949,19 @@ function testLLM() {
  * 打断当前对话（中断TTS播放并重新开始监听）
  */
 function interruptConversation() {
-    console.log('🛑 用户主动打断对话');
+    console.log('🛑 用户主动打断对话，重新开始监听');
     
     // 立即停止TTS播放
     TTSManager.stopAll();
     
-    // 发送TTS中断信号到后端
+    // 发送restart_conversation信号重新激活ASR监听
     if (websocket && websocket.readyState === WebSocket.OPEN) {
-        const interruptMessage = {
-            type: 'tts_interrupt',
-            reason: '用户主动打断'
+        const restartMessage = {
+            type: 'restart_conversation',
+            reason: '用户主动打断TTS并重新开始监听'
         };
-        WebSocketManager.safeSend(websocket, JSON.stringify(interruptMessage));
-        console.log('📤 已发送TTS中断信号到后端');
+        WebSocketManager.safeSend(websocket, JSON.stringify(restartMessage));
+        console.log('📤 已发送restart_conversation信号，重新激活ASR监听');
     }
     
     // 更新状态显示
@@ -1972,14 +1972,13 @@ function interruptConversation() {
     
     // 显示打断成功的临时提示
     const $status = $('#status');
-    const originalStatus = $status.text();
-    $status.text('🛑 已打断，继续说话...');
+    $status.text('🛑 已打断，正在监听...');
     
     setTimeout(() => {
         if (isStreaming) {
             $status.text(getLangText('listening'));
         }
-    }, 2000);
+    }, 1500);
 }
 
 
