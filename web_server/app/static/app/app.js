@@ -696,6 +696,9 @@ async function toggleStreamMode() {
             $btn.text(langData.stopChat).addClass('active').prop('disabled', false);
                 $status.text(getLangText('listening'));
                 isStreaming = true;
+                
+                // 对话开始时显示重置按钮
+                $('#resetBtn').show();
 
             } catch (micError) {
                 ErrorHandler.showError(micError, '麦克风启动失败');
@@ -744,6 +747,9 @@ async function startRecordingOnly() {
         $btn.text(langData.stopChat).addClass('active').prop('disabled', false);
         $status.text(getLangText('listening'));
         isStreaming = true;
+        
+        // 对话开始时显示重置按钮
+        $('#resetBtn').show();
 
         console.log('录音启动成功（使用现有WebSocket连接）');
 
@@ -765,6 +771,9 @@ function resetButtonToDefault() {
         .prop('disabled', false);
 
     $('#status').text(getLangText('disconnected'));
+    
+    // 对话停止时隐藏重置按钮
+    $('#resetBtn').hide();
 }
 
 // ===========================
@@ -1076,6 +1085,13 @@ function stopStreaming() {
         window.pendingRecordingStart = null;
         console.log('🧹 清理等待中的录音启动定时器');
     }
+    
+    // 立即停止TTS播放
+    TTSManager.stopAll();
+    console.log('🛑 停止对话时中断TTS播放');
+    
+    // 隐藏打断按钮
+    $('#interruptBtn').hide();
 
     // 重置按钮到默认状态
     resetButtonToDefault();
@@ -1214,6 +1230,9 @@ const MessageHandler = {
             DOMUtils.updateTexts({
                 status: '🔊 正在合成语音...'
             });
+            
+            // 显示打断按钮
+            $('#interruptBtn').show();
         },
 
         'tts_audio': function(data) {
@@ -1234,6 +1253,9 @@ const MessageHandler = {
                     音频字节: data.total_audio_bytes + ' bytes'
                 });
             }
+
+            // 隐藏打断按钮
+            $('#interruptBtn').hide();
 
             // 短暂显示完成状态
             DOMUtils.updateTexts({
@@ -1257,6 +1279,9 @@ const MessageHandler = {
 
             // 停止所有TTS播放
             TTSManager.stopAll();
+            
+            // 隐藏打断按钮
+            $('#interruptBtn').hide();
 
             // 恢复状态，让用户知道可以继续对话
             DOMUtils.updateTexts({
@@ -1280,6 +1305,9 @@ const MessageHandler = {
 
             // 立即停止TTS播放
             TTSManager.stopAll();
+            
+            // 隐藏打断按钮
+            $('#interruptBtn').hide();
 
             DOMUtils.updateTexts({
                 status: `🛑 TTS播放已中断: ${data.reason}`
@@ -1915,14 +1943,43 @@ function testLLM() {
     }
 }
 
-function toggleTTS() {
-    const enabled = TTSManager.toggleTTS();
+// TTS开关功能已删除 - TTS状态由后端配置控制
 
+/**
+ * 打断当前对话（中断TTS播放并重新开始监听）
+ */
+function interruptConversation() {
+    console.log('🛑 用户主动打断对话');
+    
+    // 立即停止TTS播放
+    TTSManager.stopAll();
+    
+    // 发送TTS中断信号到后端
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const interruptMessage = {
+            type: 'tts_interrupt',
+            reason: '用户主动打断'
+        };
+        WebSocketManager.safeSend(websocket, JSON.stringify(interruptMessage));
+        console.log('📤 已发送TTS中断信号到后端');
+    }
+    
     // 更新状态显示
-    $('#status').text(enabled ? getLangText('ttsEnabled') : getLangText('ttsDisabled'));
-    $('#currentText').text(enabled ? getLangText('ttsEnabledDetail') : getLangText('ttsDisabledDetail'));
-
-    console.log(`TTS功能${enabled ? '已启用' : '已禁用'}`);
+    DOMUtils.updateTexts({
+        status: getLangText('listening'),
+        currentText: getLangText('waitingNextSentence')
+    });
+    
+    // 显示打断成功的临时提示
+    const $status = $('#status');
+    const originalStatus = $status.text();
+    $status.text('🛑 已打断，继续说话...');
+    
+    setTimeout(() => {
+        if (isStreaming) {
+            $status.text(getLangText('listening'));
+        }
+    }, 2000);
 }
 
 
@@ -3104,8 +3161,7 @@ const LANGUAGE_DATA = {
         testLLM: '测试LLM',
         audioSettings: '音频设置',
         hideSettings: '隐藏设置',
-        ttsOn: '🔊 TTS开启',
-        ttsOff: '🔇 TTS关闭',
+        interruptConversation: '🛑 打断对话',
 
         // 音频配置
         audioConfig: '🔧 音频配置',
@@ -3149,10 +3205,6 @@ const LANGUAGE_DATA = {
         sendingTestRequest: '发送测试请求到LLM服务器...',
         testRequestFailed: '❌ 发送测试请求失败',
         testRequestFailedDetail: '无法发送测试请求，请检查连接状态',
-        ttsEnabled: '🔊 TTS已启用',
-        ttsDisabled: '🔇 TTS已禁用',
-        ttsEnabledDetail: 'AI回答将自动播放语音',
-        ttsDisabledDetail: 'AI回答仅显示文字',
         uploadAudioFile: '请上传音频文件...',
 
         // 流式识别相关
@@ -3202,8 +3254,7 @@ const LANGUAGE_DATA = {
         testLLM: 'Test LLM',
         audioSettings: 'Audio Settings',
         hideSettings: 'Hide Settings',
-        ttsOn: '🔊 TTS On',
-        ttsOff: '🔇 TTS Off',
+        interruptConversation: '🛑 Interrupt',
 
         // 音频配置
         audioConfig: '🔧 Audio Configuration',
@@ -3247,10 +3298,6 @@ const LANGUAGE_DATA = {
         sendingTestRequest: 'Sending test request to LLM server...',
         testRequestFailed: '❌ Test request failed',
         testRequestFailedDetail: 'Unable to send test request, please check connection',
-        ttsEnabled: '🔊 TTS Enabled',
-        ttsDisabled: '🔇 TTS Disabled',
-        ttsEnabledDetail: 'AI responses will be played as audio',
-        ttsDisabledDetail: 'AI responses will be text only',
         uploadAudioFile: 'Please upload audio file...',
 
         // 流式识别相关
@@ -3332,14 +3379,7 @@ function applyLanguage(lang) {
     $('#resetBtn').text(langData.resetChat);
     $('#testBtn').text(langData.testLLM);
     $('#configBtn').text(langData.audioSettings);
-
-    // 更新TTS按钮 - 根据当前状态显示对应文本
-    const ttsBtn = $('#ttsBtn');
-    if (appState && appState.ttsEnabled !== undefined) {
-        ttsBtn.text(appState.ttsEnabled ? langData.ttsOn : langData.ttsOff);
-    } else {
-        ttsBtn.text(langData.ttsOn);
-    }
+    $('#interruptBtn').text(langData.interruptConversation);
 
     // 更新音频配置面板
     $('#audioConfigPanel h4').html(langData.audioConfig);
@@ -3391,10 +3431,6 @@ function applyLanguage(lang) {
         $status.text(langData.aiResponding);
     } else if (currentStatusText === otherLangData.testingLLM) {
         $status.text(langData.testingLLM);
-    } else if (currentStatusText === otherLangData.ttsEnabled) {
-        $status.text(langData.ttsEnabled);
-    } else if (currentStatusText === otherLangData.ttsDisabled) {
-        $status.text(langData.ttsDisabled);
     }
 
     // 更新当前文本
@@ -3408,10 +3444,6 @@ function applyLanguage(lang) {
         $currentText.text(langData.sendingTestRequest);
     } else if (currentText === otherLangData.testRequestFailedDetail) {
         $currentText.text(langData.testRequestFailedDetail);
-    } else if (currentText === otherLangData.ttsEnabledDetail) {
-        $currentText.text(langData.ttsEnabledDetail);
-    } else if (currentText === otherLangData.ttsDisabledDetail) {
-        $currentText.text(langData.ttsDisabledDetail);
     } else if (currentText === otherLangData.uploadAudioFile) {
         $currentText.text(langData.uploadAudioFile);
     }

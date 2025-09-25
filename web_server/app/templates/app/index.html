@@ -220,10 +220,16 @@
         <div id="realtimeControls" class="control-section">
             <div style="text-align: center;">
                 <button id="streamBtn" class="btn" onclick="toggleStreamMode()">Start Chat</button>
-                <button id="resetBtn" class="btn" onclick="resetConversation()" style="background-color: #6c757d;">Reset Chat</button>
+                <button id="interruptBtn" class="btn" onclick="interruptConversation()" style="background-color: #dc3545; display: none;">🛑 Interrupt</button>
+            </div>
+            
+            <!-- 分隔线 -->
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid #dee2e6;">
+            
+            <div style="text-align: center;">
+                <button id="resetBtn" class="btn" onclick="resetConversation()" style="background-color: #6c757d; display: none;">Reset Chat</button>
                 <button id="testBtn" class="btn" onclick="testLLM()" style="background-color: #ffc107;">Test LLM</button>
                 <button id="configBtn" class="btn" onclick="ConfigManager.toggleAudioConfig()" style="background-color: #17a2b8;">Audio Settings</button>
-                <button id="ttsBtn" class="btn" onclick="toggleTTS()" style="background-color: #28a745;">🔊 TTS On</button>
 
             </div>
 
