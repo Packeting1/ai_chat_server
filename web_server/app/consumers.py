@@ -175,6 +175,58 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
         raise StopConsumer()
 
+    async def _ensure_asr_ready(self):
+        """确保ASR连接和任务处于正常状态"""
+        try:
+            # 检查ASR连接状态
+            if not self.asr_connected or not self.funasr_client or not self.funasr_client.is_connected():
+                logger.info(f"🔄 用户 {self.user_id} ASR连接异常，重新建立连接...")
+                await self.connect_funasr()
+                
+                # 连接后再次验证状态
+                if not self.asr_connected or not self.funasr_client or not self.funasr_client.is_connected():
+                    raise Exception("ASR连接建立失败")
+                return
+
+            # 检查FunASR响应处理任务状态
+            if not self.funasr_task or self.funasr_task.done():
+                logger.info(f"🔄 用户 {self.user_id} ASR响应任务异常，重新启动...")
+                if self.funasr_task and not self.funasr_task.done():
+                    self.funasr_task.cancel()
+                    try:
+                        await self.funasr_task
+                    except asyncio.CancelledError:
+                        pass
+                
+                # 重新启动响应处理任务
+                if self.is_running:  # 确保只在运行状态下启动任务
+                    self.funasr_task = asyncio.create_task(self.handle_funasr_responses())
+
+            # 清空可能存在的音频缓冲，避免旧数据干扰
+            if hasattr(self, '_pending_audio_chunks'):
+                self._pending_audio_chunks.clear()
+                self._pending_audio_bytes = 0
+
+            logger.info(f"✅ 用户 {self.user_id} ASR状态检查完成，连接正常")
+            
+        except Exception as e:
+            logger.error(f"❌ 用户 {self.user_id} ASR状态检查失败: {e}")
+            # 如果检查失败，尝试重新连接
+            try:
+                await self.connect_funasr()
+            except Exception as reconnect_error:
+                logger.error(f"❌ 用户 {self.user_id} ASR重连失败: {reconnect_error}")
+                # 发送连接失败通知到前端
+                await self.send(
+                    text_data=json.dumps(
+                        {
+                            "type": "asr_connection_failed",
+                            "message": "ASR服务连接失败，请检查服务器状态",
+                            "error": str(reconnect_error)
+                        }
+                    )
+                )
+
     async def connect_funasr(self):
         """连接到FunASR服务（独立连接模式）"""
         try:
@@ -802,6 +854,19 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
         # 等待一小段时间，让可能仍在执行的异步任务有机会检查状态并退出
         await asyncio.sleep(0.1)
+
+        # 确保ASR连接和任务正常运行
+        await self._ensure_asr_ready()
+
+        # 发送ASR连接状态确认到前端
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "asr_connected",
+                    "message": "ASR服务已就绪，可以开始语音识别"
+                }
+            )
+        )
 
         # 获取当前对话历史数量
         conversation_history = await session_manager.get_conversation_history(

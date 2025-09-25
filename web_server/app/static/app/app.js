@@ -1322,9 +1322,49 @@ const MessageHandler = {
             // 隐藏重新开始按钮，恢复正常状态
             hideConversationPaused();
 
-            // 更新状态显示
+            // 更新状态显示 - 先显示连接状态，等待ASR确认
             DOMUtils.updateTexts({
-                status: getLangText('listening')
+                status: getLangText('connectingWs')
+            });
+
+            // 设置ASR连接确认的Promise和超时
+            let asrConnectionResolve, asrConnectionReject;
+            const asrConnectionPromise = new Promise((resolve, reject) => {
+                asrConnectionResolve = resolve;
+                asrConnectionReject = reject;
+            });
+
+            // 存储到全局，供消息处理器使用
+            window.asrConnectionPromise = {
+                resolve: asrConnectionResolve,
+                reject: asrConnectionReject
+            };
+
+            // 设置5秒超时
+            const connectionTimeout = setTimeout(() => {
+                if (window.asrConnectionPromise) {
+                    console.warn('⚠️ ASR连接确认超时，但继续尝试录音');
+                    window.asrConnectionPromise = null;
+                    // 超时后仍然尝试启动录音
+                    DOMUtils.updateTexts({
+                        status: getLangText('listening')
+                    });
+                }
+            }, 5000);
+
+            // 等待ASR连接确认后更新状态
+            asrConnectionPromise.then(() => {
+                clearTimeout(connectionTimeout);
+                DOMUtils.updateTexts({
+                    status: getLangText('listening')
+                });
+                console.log('✅ ASR连接已确认，状态更新为监听中');
+            }).catch((error) => {
+                clearTimeout(connectionTimeout);
+                console.error('❌ ASR连接确认失败:', error);
+                DOMUtils.updateTexts({
+                    status: '❌ ASR连接失败'
+                });
             });
 
             // 更新对话模式UI显示
