@@ -529,6 +529,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                     )
 
                                 # 调用LLM获取回答
+                                logger.info(f"🎯 用户 {self.user_id} 准备调用LLM，conversation_active={self.conversation_active}, is_running={self.is_running}")
                                 await self.call_llm_and_respond(display_text)
 
                                 # 在一次性对话模式下，ASR识别完成后立即停止监听（但不发送暂停消息）
@@ -561,9 +562,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             self._current_processing_token = getattr(self, '_restart_token', None)
             
             # 在开始LLM调用前再次确认对话状态和连接状态
+            logger.info(f"🔍 用户 {self.user_id} LLM调用检查: conversation_active={self.conversation_active}, is_running={self.is_running}, user_input='{user_input[:50]}...'")
             if not self.conversation_active or not self.is_running:
                 logger.warning(
-                    f"❌ 用户 {self.user_id} 对话已不活跃或连接已断开，跳过LLM调用"
+                    f"❌ 用户 {self.user_id} 对话已不活跃或连接已断开，跳过LLM调用 (conversation_active={self.conversation_active}, is_running={self.is_running})"
                 )
                 return
 
@@ -812,11 +814,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
     async def handle_restart_conversation(self, message=None):
         """处理重新开始对话（用于一次性对话模式）"""
+        logger.info(f"🔄 开始处理用户 {self.user_id} 的restart_conversation请求，当前状态: conversation_active={self.conversation_active}")
+        
         # 生成restart标记，防止旧任务覆盖新的对话状态
         self._restart_token = secrets.token_hex(8)
         
         # 重新激活对话状态
         self.conversation_active = True
+        logger.info(f"✅ 用户 {self.user_id} conversation_active已设置为True，token: {self._restart_token[:6]}...")
 
         # 清理当前轮次的文本状态和AI状态，防止继续执行之前未完成的任务
         self.accumulated_text = ""
@@ -1030,11 +1035,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             current_token = getattr(self, '_restart_token', None) 
             if processing_token is None:
                 processing_token = getattr(self, '_current_processing_token', current_token)
+            logger.info(f"🔍 用户 {self.user_id} 暂停检查: current_token={current_token}, processing_token={processing_token}")
             if current_token == processing_token:
                 self.conversation_active = False
-                logger.debug(f"🛑 用户 {self.user_id} 对话暂停")
+                logger.info(f"🛑 用户 {self.user_id} 对话暂停，conversation_active设置为False")
             else:
-                logger.debug(f"🔄 用户 {self.user_id} 检测到restart，跳过暂停对话")
+                logger.info(f"🔄 用户 {self.user_id} 检测到restart，跳过暂停对话，保持conversation_active=True")
 
         except Exception as e:
             logger.error(f"发送conversation_paused消息失败: {e}")
