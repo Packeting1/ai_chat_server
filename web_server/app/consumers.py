@@ -441,6 +441,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     if data is None:
                         continue
 
+                    logger.info(f"🎤 用户 {self.user_id} 收到FunASR原始数据: {data}")
                     if "text" in data and self.is_running:
                         raw_text = data["text"]
                         mode = data.get("mode", "")
@@ -828,8 +829,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
         # 清理当前轮次的文本状态和AI状态，防止继续执行之前未完成的任务
         self.accumulated_text = ""
-        self.last_complete_text = ""
+        self.last_complete_text = ""  # 清空上次完整文本，允许重复识别相同内容
         self.is_ai_speaking = False  # 重置AI说话状态，防止之前的任务继续执行
+        logger.info(f"🧹 用户 {self.user_id} 已清理文本状态: accumulated_text='', last_complete_text='')")
 
         # 中断可能仍在进行的TTS播放
         try:
