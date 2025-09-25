@@ -864,12 +864,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         else:
             logger.warning(f"⚠️ 用户 {self.user_id} FunASR响应处理任务已停止，可能需要重启")
         
-        # 检查FunASR连接状态，仅在必要时重连
-        if not self._is_funasr_ready():
-            logger.warning(f"⚠️ 用户 {self.user_id} FunASR连接状态异常，尝试重连")
-            await self.reconnect_funasr()
-        else:
-            logger.info(f"✅ 用户 {self.user_id} FunASR连接状态正常，无需重连")
+        # 在重启时强制刷新FunASR连接，解决数据接收阻塞问题
+        logger.info(f"🔄 用户 {self.user_id} 重启时强制刷新FunASR连接，确保数据通道正常")
+        await self.reconnect_funasr()
         
         logger.info(f"🔄 用户 {self.user_id} 对话重启，token: {self._restart_token[:6]}...")
 
