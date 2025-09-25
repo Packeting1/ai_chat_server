@@ -290,20 +290,176 @@ class TTSManager:
                    tts_voice: str = None) -> bool:
         """执行TTS语音合成"""
         try:
-            if not await self.is_enabled():
+            from .models import SystemConfig
+            from .tts_pool import tts_speak_stream
+            import uuid
+            import time
+            import base64
+            
+            # 检查TTS是否启用
+            config = await SystemConfig.objects.aget(pk=1)
+            if not config.tts_enabled:
                 await self.send(json.dumps({
                     "type": "ai_response_complete",
                     "message": "AI回答已完成（TTS未启用）",
                 }))
+                
+                # 检查是否为一次性对话模式，发送暂停消息
+                if not config.continuous_conversation:
+                    await self._send_paused_message(config)
                 return True
+
+            # 获取采样率配置
+            sample_rate = config.tts_sample_rate
+            current_tts_id = str(uuid.uuid4())
             
-            # 这里保持原有的TTS逻辑不变，只是封装在管理器中
-            # 具体实现将在后续阶段迁移
-            return True
+            # 音频时长跟踪变量
+            total_audio_bytes = 0
+            start_time = time.time()
+            bytes_per_sample = 2  # 16-bit PCM
+            channels = 1  # 单声道
+            
+            # 发送TTS开始通知
+            await self.send(json.dumps({
+                "type": "tts_start",
+                "tts_id": current_tts_id,
+                "message": "开始语音合成...",
+                "sample_rate": sample_rate,
+                "format": "pcm",
+                "bits_per_sample": 16,
+                "send_interval_ms": 80,
+                "encoding": "base64",
+            }))
+
+            # 固定帧长度：80ms
+            frame_samples = max(1, int(sample_rate * 80 / 1000))
+            frame_bytes = frame_samples * bytes_per_sample
+
+            # 音频数据缓冲
+            pending_bytes = bytearray()
+            
+            def on_audio_data(audio_data):
+                nonlocal pending_bytes, total_audio_bytes
+                try:
+                    if not audio_data or len(audio_data) == 0:
+                        return
+                    
+                    total_audio_bytes += len(audio_data)
+                    pending_bytes.extend(audio_data)
+                    
+                except Exception as e:
+                    logger.error(f"音频回调处理失败: {e}")
+
+            # 使用TTS连接池进行语音合成
+            success = await tts_speak_stream(text, self.user_id, on_audio_data, tts_voice)
+
+            # 发送剩余的音频数据
+            while len(pending_bytes) >= frame_bytes:
+                frame = bytes(pending_bytes[:frame_bytes])
+                del pending_bytes[:frame_bytes]
+
+                audio_b64 = base64.b64encode(frame).decode("ascii")
+                await self.send(json.dumps({
+                    "type": "tts_audio",
+                    "tts_id": current_tts_id,
+                    "audio_data": audio_b64,
+                    "audio_size": len(audio_b64),
+                }))
+
+            # 处理最后不足一帧的数据
+            if len(pending_bytes) > 0:
+                remainder = len(pending_bytes) % frame_bytes
+                if remainder != 0:
+                    pad_len = frame_bytes - remainder
+                    pending_bytes.extend(b"\x00" * pad_len)
+
+                while len(pending_bytes) >= frame_bytes:
+                    frame = bytes(pending_bytes[:frame_bytes])
+                    del pending_bytes[:frame_bytes]
+
+                    audio_b64 = base64.b64encode(frame).decode("ascii")
+                    await self.send(json.dumps({
+                        "type": "tts_audio",
+                        "tts_id": current_tts_id,
+                        "audio_data": audio_b64,
+                        "audio_size": len(audio_b64),
+                        "is_final": True,
+                    }))
+
+            if success:
+                # 计算实际音频时长
+                actual_duration_ms = 0
+                if total_audio_bytes > 0:
+                    actual_duration_ms = (total_audio_bytes / (sample_rate * bytes_per_sample * channels)) * 1000
+                
+                processing_time_ms = (time.time() - start_time) * 1000
+                
+                # 发送AI完成通知
+                await self.send(json.dumps({
+                    "type": "ai_response_complete",
+                    "message": "AI回答和语音合成都已完成",
+                }))
+
+                # 发送TTS完成通知
+                await self.send(json.dumps({
+                    "type": "tts_complete", 
+                    "message": "语音合成完成",
+                    "tts_id": current_tts_id,
+                    "duration_ms": round(actual_duration_ms),
+                    "processing_time_ms": round(processing_time_ms),
+                    "total_audio_bytes": total_audio_bytes,
+                }))
+
+                # 检查是否为一次性对话模式
+                if not config.continuous_conversation:
+                    await self._send_paused_message(config)
+            else:
+                # TTS失败处理
+                processing_time_ms = (time.time() - start_time) * 1000
+                
+                await self.send(json.dumps({
+                    "type": "tts_error", 
+                    "error": "语音合成失败，但对话可以继续",
+                    "tts_id": current_tts_id,
+                    "processing_time_ms": round(processing_time_ms),
+                }))
+
+                await self.send(json.dumps({
+                    "type": "ai_response_complete",
+                    "message": "AI回答已完成，语音合成失败但对话可继续",
+                }))
+
+                if not config.continuous_conversation:
+                    await self._send_paused_message(config)
+            
+            return success
             
         except Exception as e:
             await self.error_boundary.handle_error(e, "TTS语音合成", "tts_error")
+            
+            # 确保前端状态恢复
+            await self.send(json.dumps({
+                "type": "ai_response_complete",
+                "message": "AI回答已完成，语音合成异常但对话可继续",
+            }))
+            
             return False
+    
+    async def _send_paused_message(self, config):
+        """发送暂停消息的辅助方法"""
+        try:
+            from .utils import session_manager
+            conversation_history = await session_manager.get_conversation_history(self.user_id)
+            history_count = len(conversation_history)
+            
+            await self.send(json.dumps({
+                "type": "conversation_paused",
+                "message": "本次对话已结束",
+                "mode": "one_time",
+                "history_count": history_count,
+            }))
+        except Exception as e:
+            logger.error(f"发送暂停消息失败: {e}")
     
     async def interrupt(self):
         """中断TTS播放"""
@@ -324,11 +480,12 @@ class HealthMonitor:
     """健康监控器 - 监控系统健康状态"""
     
     def __init__(self, user_id: str, asr_manager: ASRManager, 
-                 task_manager: TaskManager):
+                 task_manager: TaskManager, response_handler_factory=None):
         self.user_id = user_id
         self.asr_manager = asr_manager
         self.task_manager = task_manager
         self.is_running = True
+        self.response_handler_factory = response_handler_factory
     
     async def start_monitoring(self):
         """开始健康监控"""
@@ -357,8 +514,11 @@ class HealthMonitor:
                 if not self.task_manager.is_task_running("response_handler"):
                     if self.asr_manager.state.is_ready():
                         logger.warning(f"用户 {self.user_id} 响应处理任务异常，重新启动...")
-                        # 这里需要重新启动响应处理任务
-                        # 具体实现在后续阶段完成
+                        # 重新启动响应处理任务
+                        if self.response_handler_factory:
+                            await self.asr_manager.start_response_handler(
+                                self.response_handler_factory
+                            )
                 
                 # 检查连接超时（30分钟）
                 if (self.asr_manager.state.asr_client and 

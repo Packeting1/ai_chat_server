@@ -23,7 +23,7 @@ from .utils import session_manager
 logger = logging.getLogger(__name__)
 
 
-class StreamChatConsumerV2(AsyncWebsocketConsumer):
+class StreamChatConsumer(AsyncWebsocketConsumer):
     """
     流式聊天WebSocket消费者 V2
     重构后的简化版本，每个组件职责单一
@@ -181,7 +181,8 @@ class StreamChatConsumerV2(AsyncWebsocketConsumer):
         
         # 健康监控
         self.health_monitor = HealthMonitor(
-            self.user_id, self.asr_manager, self.task_manager
+            self.user_id, self.asr_manager, self.task_manager,
+            self._create_asr_response_handler
         )
     
     def _setup_message_routing(self):
