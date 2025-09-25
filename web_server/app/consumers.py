@@ -426,6 +426,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
     async def handle_funasr_responses(self):
         """处理FunASR的识别结果"""
+        loop_count = 0
         try:
             while self.is_running:
                 try:
@@ -439,6 +440,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
                     data = await self.funasr_client.receive_message(timeout=1.0)
                     if data is None:
+                        loop_count += 1
+                        if loop_count % 10 == 0:  # 每10秒输出一次状态
+                            logger.info(f"🔄 用户 {self.user_id} FunASR等待中... (循环{loop_count}次, conversation_active={self.conversation_active})")
                         continue
 
                     logger.info(f"🎤 用户 {self.user_id} 收到FunASR原始数据: {data}")
@@ -850,13 +854,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         else:
             logger.warning(f"⚠️ 用户 {self.user_id} FunASR响应处理任务已停止，可能需要重启")
         
-        # 检查FunASR连接状态
-        if self._is_funasr_ready():
-            logger.info(f"✅ 用户 {self.user_id} FunASR连接状态正常")
-        else:
-            logger.warning(f"⚠️ 用户 {self.user_id} FunASR连接状态异常，asr_connected={self.asr_connected}")
-            # 尝试重连FunASR
-            await self.reconnect_funasr()
+        # 主动刷新FunASR连接，确保重启后连接状态完全正常
+        logger.info(f"🔄 用户 {self.user_id} 主动刷新FunASR连接以确保重启后状态正常")
+        await self.reconnect_funasr()
         
         logger.info(f"🔄 用户 {self.user_id} 对话重启，token: {self._restart_token[:6]}...")
 
