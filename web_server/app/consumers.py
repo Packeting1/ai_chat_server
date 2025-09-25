@@ -483,11 +483,13 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         elif mode == "2pass-offline" or mode == "offline":
                             # 最终结果，检查是否需要调用LLM
                             self.accumulated_text = raw_text
+                            logger.info(f"🎯 用户 {self.user_id} 收到ASR最终结果: '{raw_text}' (mode={mode})")
 
                             # 获取配置并处理识别结果
                             config = await get_system_config_async()
                             result = process_recognition_result(raw_text, config)
                             display_text = result["cleaned_text"]
+                            logger.info(f"📝 用户 {self.user_id} 处理后文本: '{display_text}'")
 
                             # 更新检测到的语言和TTS音色（最终结果通常包含更准确的语言信息）
                             if result["detected_language"]:
@@ -498,6 +500,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                 )
 
                             # 检查是否有有效的新文本且对话仍然活跃，同时确保连接状态正常
+                            logger.info(f"🔍 用户 {self.user_id} LLM调用条件检查: display_text='{display_text}', last_complete_text='{self.last_complete_text}', conversation_active={self.conversation_active}, is_running={self.is_running}")
                             if (
                                 display_text
                                 and display_text.strip()
