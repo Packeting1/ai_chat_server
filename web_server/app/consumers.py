@@ -739,19 +739,29 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     config.max_conversation_history,
                 )
 
-                # TTS语音合成（确保即使TTS失败也不会影响对话流程）
+                # 发送AI回答完成通知（LLM服务完成）
+                await self.send(
+                    text_data=json.dumps(
+                        {
+                            "type": "ai_response_complete",
+                            "message": "AI回答已完成",
+                        }
+                    )
+                )
+
+                # TTS语音合成（独立服务，确保即使TTS失败也不会影响对话流程）
                 try:
                     await self.handle_tts_speak(
                         filtered_response, self.detected_language, self.tts_voice
                     )
                 except Exception as tts_error:
                     logger.error(f"🚨 TTS调用失败，用户: {self.user_id}: {tts_error}")
-                    # TTS失败时发送完成通知，确保前端状态恢复
+                    # TTS失败时发送TTS错误通知
                     await self.send(
                         text_data=json.dumps(
                             {
-                                "type": "ai_response_complete",
-                                "message": "AI回答已完成，TTS语音合成失败但对话可继续",
+                                "type": "tts_error",
+                                "error": "TTS语音合成失败，但对话可继续",
                             }
                         )
                     )
@@ -771,12 +781,12 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                         {"type": "ai_error", "error": "AI服务暂时不可用"}
                     )
                 )
-                # LLM失败时也要发送完成通知，确保前端状态恢复
+                # LLM失败时发送AI响应完成通知，确保前端状态恢复
                 await self.send(
                     text_data=json.dumps(
                         {
                             "type": "ai_response_complete",
-                            "message": "AI回答失败，对话可继续",
+                            "message": "AI回答失败",
                         }
                     )
                 )
@@ -1040,20 +1050,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # 检查TTS是否启用
             config = await SystemConfig.objects.aget(pk=1)
             if not config.tts_enabled:
-                # TTS未启用时，直接发送AI完成通知
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "ai_response_complete",
-                            "message": "AI回答已完成（TTS未启用）",
-                        }
-                    )
-                )
-
-                # 检查是否为一次性对话模式，发送暂停消息
+                # TTS未启用时，直接检查是否为一次性对话模式，发送暂停消息
                 if not config.continuous_conversation:
                     await self.send_conversation_paused_message(self._current_processing_token)
-
                 return
 
             # 获取采样率配置
@@ -1221,17 +1220,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 # 计算处理耗时（毫秒）
                 processing_time_ms = (time.time() - start_time) * 1000
                 
-                # 先发送AI完成通知
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "ai_response_complete",
-                            "message": "AI回答和语音合成都已完成",
-                        }
-                    )
-                )
-
-                # 再发送TTS完成通知，包含时长信息
+                # 发送TTS完成通知，包含时长信息
                 await self.send(
                     text_data=json.dumps(
                         {
@@ -1269,15 +1258,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                     f"❌ TTS合成失败，用户: {self.user_id}, 文本: {text[:50]}..."
                 )
 
-                # 发送AI完成状态
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "ai_response_complete",
-                            "message": "AI回答已完成，语音合成失败但对话可继续",
-                        }
-                    )
-                )
+                # 注意：AI回答完成通知已在call_llm_and_respond中发送，这里只处理TTS相关状态
 
                 # 即使TTS失败，在一次性对话模式下也要发送暂停消息（保持连接）
                 config = await SystemConfig.objects.aget(pk=1)
@@ -1297,27 +1278,19 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # TTS异常时也计算处理时间
             processing_time_ms = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
             
-            # TTS异常时确保前端状态恢复
+            # TTS异常时发送错误通知
             await self.send(
                 text_data=json.dumps(
                     {
                         "type": "tts_error",
                         "error": f"语音合成异常: {str(e)}，但对话可以继续",
-                        "tts_id": current_tts_id,
+                        "tts_id": current_tts_id if 'current_tts_id' in locals() else None,
                         "processing_time_ms": round(processing_time_ms),
                     }
                 )
             )
-
-            # 发送AI完成状态，确保前端不会卡住
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "ai_response_complete",
-                        "message": "AI回答已完成，语音合成异常但对话可继续",
-                    }
-                )
-            )
+            
+            # 注意：AI回答完成通知已在call_llm_and_respond中发送，这里只处理TTS相关状态
 
             # TTS异常时，也要检查是否需要发送暂停消息（保持连接）
             config = await SystemConfig.objects.aget(pk=1)

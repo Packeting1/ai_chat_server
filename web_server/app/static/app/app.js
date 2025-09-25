@@ -1224,7 +1224,16 @@ const MessageHandler = {
         },
 
         'tts_complete': function(data) {
-            console.log('TTS合成完成:', data.message);
+            console.log('🔊 TTS语音合成完成:', data.message);
+            
+            // 记录TTS统计信息
+            if (data.duration_ms && data.processing_time_ms) {
+                console.log('📊 TTS统计:', {
+                    音频时长: data.duration_ms + 'ms',
+                    处理耗时: data.processing_time_ms + 'ms',
+                    音频字节: data.total_audio_bytes + ' bytes'
+                });
+            }
 
             // 短暂显示完成状态
             DOMUtils.updateTexts({
@@ -1316,12 +1325,12 @@ const MessageHandler = {
         },
 
         'ai_response_complete': function(data) {
-            console.log('AI回答完成（含TTS处理）:', data.message);
+            console.log('🤖 AI回答完成:', data.message);
 
-            // 完成AI回答（这个可以立即执行，表示AI文本回答完成）
+            // 完成AI文本回答（LLM服务完成）
             this.completeAIResponse();
 
-            console.log('📝 AI文本回答已完成，TTS继续播放中...');
+            console.log('📝 AI文本回答已完成');
         },
 
         // 新增：对话模式相关消息处理器
@@ -1498,7 +1507,7 @@ const MessageHandler = {
     },
 
     /**
-     * 完成AI响应
+     * 完成AI文本响应（仅LLM服务完成，不包括TTS）
      */
     completeAIResponse() {
         $('#status').text(getLangText('listening'));
