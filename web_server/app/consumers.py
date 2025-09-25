@@ -80,6 +80,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         self.is_one_time_disconnect = False  # 标记是否为一次性对话的强制断开
         self.detected_language = None  # 存储检测到的语言
         self.tts_voice = None  # 存储选择的TTS音色
+        self._restart_token = secrets.token_hex(8)  # 重启令牌，防止竞态条件
         # 短暂音频缓冲（用于重连窗口避免丢包）
         self._pending_audio_chunks: list[bytes] = []
         self._pending_audio_bytes: int = 0
@@ -523,8 +524,14 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                                 await self.call_llm_and_respond(display_text)
 
                                 # 在一次性对话模式下，ASR识别完成后立即停止监听（但不发送暂停消息）
+                                # 检查是否有新的restart令牌，防止覆盖重启后的状态
                                 if not config.continuous_conversation:
-                                    self.conversation_active = False
+                                    current_token = getattr(self, '_restart_token', None)
+                                    if current_token == getattr(self, '_current_processing_token', current_token):
+                                        self.conversation_active = False
+                                        logger.debug(f"🛑 用户 {self.user_id} 一次性对话完成，停止监听")
+                                    else:
+                                        logger.debug(f"🔄 用户 {self.user_id} 检测到restart，跳过停止监听")
 
                 except asyncio.CancelledError:
                     break
@@ -542,6 +549,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     async def call_llm_and_respond(self, user_input):
         """调用LLM并发送响应"""
         try:
+            # 记录当前处理的restart令牌，用于防止竞态条件
+            self._current_processing_token = getattr(self, '_restart_token', None)
+            
             # 在开始LLM调用前再次确认对话状态和连接状态
             if not self.conversation_active or not self.is_running:
                 logger.warning(
@@ -750,7 +760,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 if not config.continuous_conversation:
                     # 一次性对话模式：发送暂停消息（但只在TTS未启用时才在这里发送）
                     if not config.tts_enabled:
-                        await self.send_conversation_paused_message()
+                        await self.send_conversation_paused_message(self._current_processing_token)
                     # 如果TTS启用，暂停消息将在TTS完成后发送
 
         except Exception as e:
@@ -784,6 +794,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
     async def handle_restart_conversation(self, message=None):
         """处理重新开始对话（用于一次性对话模式）"""
+        # 生成restart标记，防止旧任务覆盖新的对话状态
+        self._restart_token = secrets.token_hex(8)
+        
         # 重新激活对话状态
         self.conversation_active = True
 
@@ -802,6 +815,8 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
         # 等待一小段时间，让可能仍在执行的异步任务有机会检查状态并退出
         await asyncio.sleep(0.1)
+        
+        logger.info(f"🔄 用户 {self.user_id} 对话重启，token: {self._restart_token[:6]}...")
 
         # 获取当前对话历史数量
         conversation_history = await session_manager.get_conversation_history(
@@ -809,14 +824,16 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         )
         history_count = len(conversation_history)
 
-        # 发送重新开始通知，包含对话历史信息
+        # 发送重新开始通知，包含对话历史信息和对话状态
         await self.send(
             text_data=json.dumps(
                 {
-                    "type": "conversation_restarted",
+                    "type": "conversation_restarted", 
                     "message": "对话已重启",
                     "history_count": history_count,
                     "user_id": self.user_id,
+                    "conversation_active": True,  # 明确告知前端对话已激活
+                    "restart_token": self._restart_token[:6] + "...",  # 用于调试
                 }
             )
         )
@@ -975,7 +992,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"发送TTS中断信号失败: {e}")
 
-    async def send_conversation_paused_message(self):
+    async def send_conversation_paused_message(self, processing_token=None):
         """发送对话暂停消息（统一方法）"""
         try:
             # 获取当前对话历史数量
@@ -996,7 +1013,15 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             )
 
             # 设置对话为非活跃状态
-            self.conversation_active = False
+            # 检查是否有新的restart令牌，防止覆盖重启后的状态
+            current_token = getattr(self, '_restart_token', None) 
+            if processing_token is None:
+                processing_token = getattr(self, '_current_processing_token', current_token)
+            if current_token == processing_token:
+                self.conversation_active = False
+                logger.debug(f"🛑 用户 {self.user_id} 对话暂停")
+            else:
+                logger.debug(f"🔄 用户 {self.user_id} 检测到restart，跳过暂停对话")
 
         except Exception as e:
             logger.error(f"发送conversation_paused消息失败: {e}")
@@ -1006,6 +1031,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     ):
         """处理TTS语音合成"""
         current_tts_id = str(uuid.uuid4())
+        
+        # 记录当前处理的restart令牌，用于防止竞态条件（如果没有被call_llm_and_respond设置的话）
+        if not hasattr(self, '_current_processing_token'):
+            self._current_processing_token = getattr(self, '_restart_token', None)
 
         try:
             # 检查TTS是否启用
@@ -1023,7 +1052,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
 
                 # 检查是否为一次性对话模式，发送暂停消息
                 if not config.continuous_conversation:
-                    await self.send_conversation_paused_message()
+                    await self.send_conversation_paused_message(self._current_processing_token)
 
                 return
 
@@ -1219,7 +1248,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 # 检查是否为一次性对话模式，如果是则发送暂停消息（保持连接）
                 config = await SystemConfig.objects.aget(pk=1)
                 if not config.continuous_conversation:
-                    await self.send_conversation_paused_message()
+                    await self.send_conversation_paused_message(self._current_processing_token)
 
             else:
                 # TTS失败时也计算相关信息
@@ -1253,7 +1282,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 # 即使TTS失败，在一次性对话模式下也要发送暂停消息（保持连接）
                 config = await SystemConfig.objects.aget(pk=1)
                 if not config.continuous_conversation:
-                    await self.send_conversation_paused_message()
+                    await self.send_conversation_paused_message(self._current_processing_token)
 
         except Exception as e:
             logger.error(
@@ -1293,7 +1322,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             # TTS异常时，也要检查是否需要发送暂停消息（保持连接）
             config = await SystemConfig.objects.aget(pk=1)
             if not config.continuous_conversation:
-                await self.send_conversation_paused_message()
+                await self.send_conversation_paused_message(self._current_processing_token)
 
 
 class UploadConsumer(AsyncWebsocketConsumer):

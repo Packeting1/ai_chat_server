@@ -577,15 +577,56 @@ async function toggleStreamMode() {
     if (!isStreaming) {
         // 检查是否已有活跃的WebSocket连接
         if (websocket && websocket.readyState === WebSocket.OPEN) {
-            console.log('⚠️ 检测到现有WebSocket连接，直接启动录音而不重复连接');
-            try {
-                await startRecordingOnly();
-                return;
-            } catch (error) {
-                console.error('使用现有连接启动录音失败:', error);
-                // 如果失败，关闭现有连接并重新创建
-                websocket.close();
-                websocket = null;
+            console.log('⚠️ 检测到现有WebSocket连接');
+            
+            // 检查是否为一次性对话模式且对话已暂停的情况
+            if (window.appState && window.appState.conversationMode && 
+                !window.appState.conversationMode.continuous && 
+                !window.appState.conversationMode.active) {
+                console.log('🔄 一次性对话模式且对话已暂停，需要先重启对话状态');
+                
+                // 发送重启对话消息以激活后端的conversation_active状态
+                const restartMessage = { type: 'restart_conversation' };
+                if (WebSocketManager.safeSend(websocket, JSON.stringify(restartMessage))) {
+                    console.log('✅ 已发送重启对话请求，等待状态更新');
+                    
+                    // 等待后端状态更新后再启动录音
+                    // 先更新按钮状态表示正在重启对话
+                    const langData = LANGUAGE_DATA[currentLanguage] || LANGUAGE_DATA['en'];
+                    $btn.text('🔄 重启对话中...').prop('disabled', true);
+                    $status.text('正在重启对话状态...');
+                    
+                    // 设置延迟启动录音，但可以被conversation_restarted消息取消
+                    window.pendingRecordingStart = setTimeout(async () => {
+                        window.pendingRecordingStart = null;
+                        try {
+                            console.log('⏰ 定时启动录音（500ms延迟）');
+                            await startRecordingOnly();
+                        } catch (error) {
+                            console.error('延迟启动录音失败:', error);
+                            resetButtonToDefault();
+                            websocket.close();
+                            websocket = null;
+                        }
+                    }, 500); // 等待500ms让后端处理重启消息
+                    return;
+                } else {
+                    console.error('❌ 发送重启对话消息失败，关闭连接重新开始');
+                    websocket.close();
+                    websocket = null;
+                }
+            } else {
+                // 持续对话模式或对话仍活跃，直接启动录音
+                console.log('🎤 对话状态正常，直接启动录音');
+                try {
+                    await startRecordingOnly();
+                    return;
+                } catch (error) {
+                    console.error('使用现有连接启动录音失败:', error);
+                    // 如果失败，关闭现有连接并重新创建
+                    websocket.close();
+                    websocket = null;
+                }
             }
         }
         // 更新按钮状态为连接中，但不是最终状态
@@ -617,10 +658,13 @@ async function toggleStreamMode() {
         }, 5000);
 
         try {
-            // 1. 清除保存的用户ID，确保开始全新会话
-            if (window.appState) {
-                window.appState.clearSavedUserId();
-            }
+        // 1. 清除保存的用户ID，确保开始全新会话
+        if (window.appState) {
+            window.appState.clearSavedUserId();
+        }
+        
+        // 2. 清空前端对话历史（因为这是"开始新对话"）
+        ConversationManager.clearHistory();
 
             // 2. 连接WebSocket（开始新对话时不传递保存的用户ID）
             const connectParams = {};
@@ -1025,6 +1069,13 @@ function stopStreaming() {
     
     // 清除保持连接标志，因为这是用户主动停止
     window.keepConnectionAlive = false;
+    
+    // 清理等待中的录音启动定时器
+    if (window.pendingRecordingStart) {
+        clearTimeout(window.pendingRecordingStart);
+        window.pendingRecordingStart = null;
+        console.log('🧹 清理等待中的录音启动定时器');
+    }
 
     // 重置按钮到默认状态
     resetButtonToDefault();
@@ -1052,6 +1103,13 @@ function stopRecordingKeepConnection() {
     
     // 设置标志表示需要保持连接以便后续重连
     window.keepConnectionAlive = true;
+    
+    // 清理等待中的录音启动定时器
+    if (window.pendingRecordingStart) {
+        clearTimeout(window.pendingRecordingStart);
+        window.pendingRecordingStart = null;
+        console.log('🧹 清理等待中的录音启动定时器（保持连接模式）');
+    }
 
     // 重置按钮到默认状态
     resetButtonToDefault();
@@ -1303,9 +1361,9 @@ const MessageHandler = {
         },
 
         'conversation_restarted': function(data) {
-            console.log('🔄 对话已重新开始:', data.message, '用户ID:', data.user_id, '历史记录:', data.history_count);
+            console.log('🔄 对话已重新开始:', data.message, '用户ID:', data.user_id, '历史记录:', data.history_count, 'Token:', data.restart_token);
 
-            // 更新对话状态
+            // 更新对话状态 - 立即设置为活跃状态
             if (window.appState) {
                 window.appState.conversationMode.active = true;
                 window.appState.conversationMode.historyCount = data.history_count || 0;
@@ -1317,6 +1375,28 @@ const MessageHandler = {
                     localStorage.setItem('saved_user_id', data.user_id);
                     console.log('📝 用户ID更新:', oldUserId, '→', data.user_id);
                 }
+            }
+            
+            // 立即更新状态显示
+            DOMUtils.updateTexts({
+                status: '✅ 对话状态已激活'
+            });
+            
+            // 如果有等待中的录音启动（通过延迟启动的），立即取消延迟直接启动
+            if (window.pendingRecordingStart) {
+                clearTimeout(window.pendingRecordingStart);
+                window.pendingRecordingStart = null;
+                console.log('🎤 对话状态已激活，立即启动录音');
+                
+                // 立即启动录音
+                setTimeout(async () => {
+                    try {
+                        await startRecordingOnly();
+                        console.log('✅ 对话重启后录音启动成功');
+                    } catch (error) {
+                        console.error('❌ 对话重启后录音启动失败:', error);
+                    }
+                }, 50);
             }
 
             // 隐藏重新开始按钮，恢复正常状态
